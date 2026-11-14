@@ -21,27 +21,24 @@ provider, or credentials.
 
 ## Optional npm invocation
 
-An optional route uses [Node.js](https://nodejs.org/) plus Python 3.11+.
-The npm command becomes available only after @socraticlearn/cli is published.
-This guide does not claim that the npm scope or package is already published.
+If you already use Node.js, you can start sessions with `npx` instead of pipx.
+You still need Python 3.11+ on the machine. The npm command becomes available
+only after @socraticlearn/cli is published. This guide does not claim that the
+npm scope or package is already published.
 
 ```text
 npx @socraticlearn/cli
 ```
 
-`npx` downloads and runs the adapter on demand. It runs the same Python
-implementation as the pipx package. Neither route installs Pi, Claude Code,
-Antigravity, or any provider credentials for you.
+Each `npx` call downloads and runs the adapter on demand. It uses the same
+Python implementation as the pipx package.
 
 ## Prerequisites and setup links
 
-| Route | Requires |
-| --- | --- |
-| pipx (primary) | Python 3.11+, pipx |
-| npx (optional) | Node.js, Python 3.11+ |
-| Either route | A supported host: Pi, Claude Code, or Antigravity |
-
-Official setup:
+Pipx installation needs Python 3.11+ and pipx itself. The optional `npx` route
+also needs Node.js while still relying on Python 3.11+. Either way, Pi, Claude
+Code, or Antigravity must already be installed and signed in; Socratic Learn does
+not install hosts or provider credentials for you.
 
 - Python: [python.org/downloads](https://www.python.org/downloads/)
 - pipx: [pipx.pypa.io](https://pipx.pypa.io/)
@@ -73,15 +70,17 @@ npm publishing; uninstalling a global npm copy is not required for occasional
 The launcher host supplies the terminal, provider authentication, model
 selection, quotas, and optional tools. Socratic Learn supplies the learning
 method, private workspace, and session checkpoints. Running `socratic` starts the
-interactive new or resume menu unless you pass a goal, use `socratic --here`, or
-run `socratic read` with a source.
+interactive new or resume menu unless you pass a goal on the command line or run
+`socratic read` with a source. Use `socratic --here` when you want the current
+directory treated as the project workspace; it does not skip the menu.
 
 ## Source and development installation
 
 Contributors clone the repository, build the checked-in distribution, and run
-tests locally. Package installation above is separate from project-adapter
-installation below. Registry packages do not use a `socratic install` command;
-adapters are installed with `python -m socratic_learn install`.
+tests locally. Installing the published package is separate from adding loaders
+inside a project. After pipx or `npx` installation, run
+`socratic install TARGET PROJECT`. From a source checkout, use
+`python -m socratic_learn install TARGET PROJECT` instead.
 
 Use Python 3.11 or newer from the repository root. The distribution supports
 exactly four project-local targets: `generic`, `cursor`, `claude-code`, and

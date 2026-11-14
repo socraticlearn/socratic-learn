@@ -39,11 +39,10 @@ built for any subject or skill.
 
 ## Quick start
 
-Normal use requires no repository clone and no source build. Install the
-launcher package, then run `socratic`. The pipx route needs [Python
-3.11+](https://www.python.org/downloads/) and [pipx](https://pipx.pypa.io/).
-The documented pipx command becomes available only after socratic-learn is
-published on PyPI.
+Normal use requires no repository clone and no source build. Install with
+[pipx](https://pipx.pypa.io/), which needs [Python
+3.11+](https://www.python.org/downloads/). The documented pipx command becomes
+available only after socratic-learn is published on PyPI.
 
 ```text
 pipx install socratic-learn
@@ -55,18 +54,19 @@ Start without putting your learning goal in shell history:
 socratic
 ```
 
-Both distribution routes run the same Python Socratic Learn implementation.
-Neither bundles an AI provider, model, credential, or host. Pi, Claude Code, or
-Antigravity stays separately installed and authenticated on your machine.
-
-Optional alternative: [Node.js](https://nodejs.org/) plus Python 3.11+ can run
-the npm adapter with `npx`. The npm command becomes available only after @socraticlearn/cli is published.
+You can also invoke the published npm adapter with `npx` when you already have
+[Node.js](https://nodejs.org/) and Python 3.11+ on the machine. The npm command
+becomes available only after @socraticlearn/cli is published.
 
 ```text
 npx @socraticlearn/cli
 ```
 
-You can also pass a goal or choose a host directly:
+Both routes run the same Python implementation. Neither ships a model, provider
+credentials, or host. Install and authenticate Pi, Claude Code, or Antigravity
+yourself.
+
+You can pass a goal or choose a host directly:
 
 ```text
 socratic "I want to learn linear algebra"
@@ -126,8 +126,9 @@ pipx uninstall socratic-learn
 `npx` is an on-demand invocation; it does not replace pipx upgrade or uninstall.
 Package removal preserves learner records under `~/.socratic-learn/learning/`.
 
-Project-adapter `socratic install ...` is different from package installation.
-It copies loaders into a repository you already cloned. See
+Package installation is different from adding loaders inside a project. After
+you install the published package, run `socratic install TARGET PROJECT`. If you
+work from a source checkout, use `python -m socratic_learn install` instead. See
 [Installation and lifecycle](docs/universal-installation.md).
 
 Source and releases live at

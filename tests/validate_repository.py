@@ -252,13 +252,21 @@ README_LAUNCHER_REQUIREMENTS = (
     "python 3.11",
     "pipx",
     "node",
-    "neither bundles",
+    "neither ships",
     "pi, claude code, and antigravity",
     "cursor remains a project integration",
-    "project-adapter",
     "socratic install",
+    "python -m socratic_learn install",
     "preserves learner",
     "https://github.com/socraticlearn/socratic-learn",
+)
+README_SHARED_RUNTIME_MARKERS = (
+    "npx @socraticlearn/cli",
+    "same python",
+)
+MENU_SKIP_HERE_PATTERN = re.compile(
+    r"menu unless[^.\n]*--here",
+    re.IGNORECASE,
 )
 SESSION_PROTOCOL_RESUME_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
@@ -516,7 +524,7 @@ ACTIVE_INSTALLATION_SURFACES = (
     (
         "docs/universal-installation.md",
         "## Normal installation",
-        "## Source and project-adapter requirements",
+        "## Source and development installation",
     ),
 )
 UNSAFE_INSTALLER_PATTERNS = (
@@ -2061,6 +2069,20 @@ def validate(root: Path) -> list[str]:
             or order_positions != sorted(order_positions)
         ):
             errors.append("README.md public onboarding is out of order")
+        shared_runtime = quick_start_text.lower()
+        if all(marker in shared_runtime for marker in README_SHARED_RUNTIME_MARKERS):
+            if shared_runtime.index("npx @socraticlearn/cli") > shared_runtime.index(
+                "same python"
+            ):
+                errors.append(
+                    "README.md must explain shared runtime after the npx route"
+                )
+        if MENU_SKIP_HERE_PATTERN.search(quick_start_text):
+            errors.append(
+                "README.md must not claim --here skips the session menu"
+            )
+        if not readme_text.endswith("\n"):
+            errors.append("README.md must end with a trailing newline")
 
     for relative, section_start, section_end in ACTIVE_INSTALLATION_SURFACES:
         path = root / relative
@@ -2107,6 +2129,19 @@ def validate(root: Path) -> list[str]:
         if any(pattern.search(section_text) for pattern in UNSAFE_INSTALLER_PATTERNS):
             errors.append(
                 f"{relative} contains unsafe or mutable installer instructions"
+            )
+
+    installation_guide = root / "docs/universal-installation.md"
+    if installation_guide.is_file():
+        installation_text = installation_guide.read_text(encoding="utf-8")
+        if MENU_SKIP_HERE_PATTERN.search(installation_text):
+            errors.append(
+                "docs/universal-installation.md must not claim "
+                "--here skips the session menu"
+            )
+        if not installation_text.endswith("\n"):
+            errors.append(
+                "docs/universal-installation.md must end with a trailing newline"
             )
 
     launcher_adapters = root / "docs/launcher-adapters.md"

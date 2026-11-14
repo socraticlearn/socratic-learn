@@ -531,10 +531,11 @@ class RepositoryValidationTests(unittest.TestCase):
             "python 3.11",
             "pipx",
             "node",
-            "neither bundles",
+            "neither ships",
             "pi, claude code, and antigravity",
             "cursor remains a project integration",
-            "project-adapter",
+            "socratic install",
+            "python -m socratic_learn install",
             BRANDED_REPOSITORY_URL.lower(),
         ):
             with self.subTest(clause=clause):
@@ -602,6 +603,13 @@ class RepositoryValidationTests(unittest.TestCase):
         ):
             with self.subTest(retired=retired):
                 self.assertNotIn(retired, without_fenced_code(quick_start).lower())
+        normalized_lower = quick_start.lower()
+        self.assertLess(
+            normalized_lower.index("npx @socraticlearn/cli"),
+            normalized_lower.index("same python"),
+        )
+        self.assertNotRegex(quick_start, r"(?is)menu unless[^.\n]*--here")
+        self.assertTrue(text.endswith("\n"))
 
     def test_launcher_and_distribution_docs_define_public_contracts(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -635,15 +643,15 @@ class RepositoryValidationTests(unittest.TestCase):
             "pipx upgrade socratic-learn",
             "pipx uninstall socratic-learn",
             "preserves learner",
-            "project-adapter",
             "socratic install",
+            "python -m socratic_learn install",
             BRANDED_REPOSITORY_URL.lower(),
         ):
             with self.subTest(document="installation", clause=clause):
                 self.assertIn(clause, installation_normalized)
         self.assertIn(PYPI_RELEASE_CAVEAT.lower(), installation_normalized)
         self.assertIn(NPM_RELEASE_CAVEAT.lower(), installation_normalized)
-        intro = installation.split("## Source and project-adapter requirements", 1)[0]
+        intro = installation.split("## Source and development installation", 1)[0]
         for retired in (
             "native channel behavior",
             "install.sh",
@@ -657,6 +665,8 @@ class RepositoryValidationTests(unittest.TestCase):
             installation,
             r"(?is)\bcurl\b[^\n|]*\|\s*(?:ba)?sh\b",
         )
+        self.assertNotRegex(installation, r"(?is)menu unless[^.\n]*--here")
+        self.assertTrue(installation.endswith("\n"))
 
     def test_validator_rejects_narrow_readme_positioning(self) -> None:
         temp, root = self.make_root()
@@ -1153,19 +1163,15 @@ class RepositoryValidationTests(unittest.TestCase):
             with self.subTest(relative=relative):
                 path = root / relative
                 original = path.read_text(encoding="utf-8")
-                unsafe = re.sub(
-                    r"The documented pipx command becomes available only after\s+"
-                    r"socratic-learn is published on\s+PyPI[.]",
+                unsafe = requirement_pattern(PYPI_RELEASE_CAVEAT).sub(
                     "Install with pipx.",
                     original,
-                    flags=re.IGNORECASE,
+                    count=1,
                 )
-                unsafe = re.sub(
-                    r"The npm command becomes available only after\s+"
-                    r"@socraticlearn/cli is published[.]",
+                unsafe = requirement_pattern(NPM_RELEASE_CAVEAT).sub(
                     "Run with npx.",
                     unsafe,
-                    flags=re.IGNORECASE,
+                    count=1,
                 )
                 path.write_text(unsafe, encoding="utf-8")
                 self.assertIn(
