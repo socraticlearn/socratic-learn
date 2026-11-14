@@ -28,6 +28,7 @@ from .thread_paths import (
 )
 from .thread_schema import (
     LegacySessionSummary,
+    ParsedSessionRecord,
     ThreadRecord,
     ThreadSummary,
     document_to_record,
@@ -61,13 +62,6 @@ def _require_regular_file(path: Path, description: str) -> None:
         raise integrity(f"{description} could not be inspected", path=path) from error
     if not stat.S_ISREG(status.st_mode):
         raise integrity(f"{description} must be a regular file", path=path)
-
-
-def _best_effort_unlink(path: Path) -> None:
-    try:
-        path.unlink()
-    except OSError:
-        pass
 
 
 def _remove_tree(path: Path) -> None:
@@ -256,6 +250,37 @@ def create_pending_encounter(
     return destination
 
 
+def _extract_pending_token(pending_name: str) -> str:
+    if not pending_name.startswith(_PENDING_PREFIX) or not pending_name.endswith(".md"):
+        raise integrity("pending encounter filename is not valid")
+    token = pending_name[len(_PENDING_PREFIX) : -len(".md")]
+    if not token:
+        raise integrity("pending encounter filename is not valid")
+    return token
+
+
+def _mapped_final_name(pending_name: str, session_date: str) -> str:
+    token = _extract_pending_token(pending_name)
+    return validate_safe_filename(f"{session_date}-{token}.md", label="final encounter")
+
+
+def _locate_promoted_final(sessions_dir: Path, pending_name: str) -> Path | None:
+    token = _extract_pending_token(pending_name)
+    matches = [
+        entry
+        for entry in sessions_dir.iterdir()
+        if entry.is_file()
+        and not entry.is_symlink()
+        and entry.name.endswith(f"-{token}.md")
+        and not entry.name.startswith(_PENDING_PREFIX)
+    ]
+    if not matches:
+        return None
+    if len(matches) != 1:
+        raise integrity("promoted encounter record is ambiguous", path=sessions_dir / pending_name)
+    return matches[0]
+
+
 def _publish_final_encounter(sessions_dir: Path, *, session_date: str, payload: bytes) -> Path:
     final_name = validate_safe_filename(f"{session_date}-{secrets.token_hex(4)}.md", label="final encounter")
     destination = sessions_dir / final_name
@@ -290,34 +315,51 @@ def finalize_thread_encounter(
     validate_storage_ancestry(records, thread_id=thread_id)
     thread_dir, sessions_dir, metadata_path = require_thread_workspace(records, thread_id)
     pending = resolve_pending_child(sessions_dir, encounter_path)
-    _require_regular_file(pending, "pending encounter record")
-
     current = load_thread(records, thread_id)
-    if current.latest_encounter is not None and current.latest_encounter == pending.name:
-        raise integrity(
-            "pending encounter is already referenced by thread metadata",
-            path=pending,
-        )
+    promoted = False
+    final_path: Path
+    parsed: ParsedSessionRecord
 
-    try:
-        payload = pending.read_bytes()
-        parsed = parse_session_record(payload.decode("utf-8"))
-    except UnicodeDecodeError as error:
-        raise integrity("encounter record is not valid UTF-8", path=pending) from error
-    except OSError as error:
-        raise integrity("encounter record could not be read", path=pending) from error
+    if pending.is_file():
+        _require_regular_file(pending, "pending encounter record")
+        try:
+            payload = pending.read_bytes()
+            parsed = parse_session_record(payload.decode("utf-8"))
+        except UnicodeDecodeError as error:
+            raise integrity("encounter record is not valid UTF-8", path=pending) from error
+        except OSError as error:
+            raise integrity("encounter record could not be read", path=pending) from error
+        final_path = sessions_dir / _mapped_final_name(pending.name, parsed.session_date)
+        if final_path.exists() or final_path.is_symlink():
+            raise integrity("encounter already finalized", path=final_path)
+        try:
+            os.replace(pending, final_path)
+            promoted = True
+        except OSError as error:
+            raise integrity("pending encounter could not be promoted", path=pending) from error
+    else:
+        located = _locate_promoted_final(sessions_dir, pending.name)
+        if located is None:
+            raise integrity("pending encounter record could not be found", path=pending)
+        final_path = located
+        try:
+            payload = final_path.read_bytes()
+            parsed = parse_session_record(payload.decode("utf-8"))
+        except UnicodeDecodeError as error:
+            raise integrity("encounter record is not valid UTF-8", path=final_path) from error
+        except OSError as error:
+            raise integrity("encounter record could not be read", path=final_path) from error
+        if _mapped_final_name(pending.name, parsed.session_date) != final_path.name:
+            raise integrity("promoted encounter record does not match pending token", path=final_path)
 
-    if current.latest_encounter is not None:
-        existing_final = sessions_dir / current.latest_encounter
-        if existing_final.is_file() and not existing_final.is_symlink():
-            try:
-                if existing_final.read_bytes() == payload:
-                    _best_effort_unlink(pending)
-                    return current
-            except OSError:
-                pass
+    if (
+        current.latest_encounter == final_path.name
+        and current.status == "complete"
+        and current.refined_title == parsed.refined_title
+        and current.next_step == parsed.next_step
+    ):
+        return current
 
-    final_path = _publish_final_encounter(sessions_dir, session_date=parsed.session_date, payload=payload)
     updated = ThreadRecord(
         id=current.id,
         provisional_title=current.provisional_title,
@@ -332,14 +374,15 @@ def finalize_thread_encounter(
     try:
         _save_thread_metadata(metadata_path, updated)
     except (IntegrityError, OSError):
-        try:
-            if final_path.exists() or final_path.is_symlink():
-                final_path.unlink()
-        except OSError:
-            pass
+        if promoted:
+            try:
+                os.replace(final_path, pending)
+            except OSError as error:
+                raise integrity(
+                    "promoted encounter could not be rolled back",
+                    path=final_path,
+                ) from error
         raise
-
-    _best_effort_unlink(pending)
     return updated
 
 
@@ -443,16 +486,18 @@ def import_legacy_session(records: Path, legacy_path: Path) -> ThreadRecord:
     _require_regular_file(resolved, "legacy session record")
 
     try:
-        text = resolved.read_text(encoding="utf-8")
-    except UnicodeDecodeError as error:
-        raise integrity("legacy session is not valid UTF-8", path=resolved) from error
+        payload = resolved.read_bytes()
     except OSError as error:
         raise integrity("legacy session could not be read", path=resolved) from error
+
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise integrity("legacy session is not valid UTF-8", path=resolved) from error
 
     display_title, next_step, refined_title = validate_legacy_session_content(text)
     session_date, _heading_title = parse_session_heading(text)
     status = "complete" if refined_title is not None else "incomplete"
-    payload = text.encode("utf-8")
 
     record = create_thread(records, goal=display_title, provisional_title=display_title)
     thread_dir, sessions_dir, metadata_path = require_thread_workspace(records, record.id)

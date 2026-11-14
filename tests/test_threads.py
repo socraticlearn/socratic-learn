@@ -162,15 +162,18 @@ class ThreadStorageTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+        token = pending.name.removeprefix("pending-").removesuffix(".md")
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
         finalized = finalize_thread_encounter(self.records, thread.id, pending)
         sessions = threads_root(self.records) / thread.id / "sessions"
         final_path = sessions / finalized.latest_encounter
+        self.assertEqual(f"{today}-{token}.md", finalized.latest_encounter)
         self.assertTrue(final_path.is_file())
         self.assertFalse(pending.exists())
         self.assertEqual("Philosophy: Plato's cave allegory", finalized.refined_title)
         self.assertEqual("complete", finalized.status)
 
-    def test_finalize_rejects_repeat_finalization(self) -> None:
+    def test_finalize_retry_completes_without_duplicate_final(self) -> None:
         thread = create_thread(self.records, goal="once")
         pending = create_pending_encounter(self.records, thread.id)
         pending.write_text(
@@ -180,9 +183,34 @@ class ThreadStorageTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        finalize_thread_encounter(self.records, thread.id, pending)
-        with self.assertRaises(IntegrityError):
-            finalize_thread_encounter(self.records, thread.id, pending)
+        first = finalize_thread_encounter(self.records, thread.id, pending)
+        second = finalize_thread_encounter(self.records, thread.id, pending)
+        self.assertEqual(first, second)
+        sessions = threads_root(self.records) / thread.id / "sessions"
+        finals = [
+            path
+            for path in sessions.iterdir()
+            if path.is_file() and not path.name.startswith("pending-")
+        ]
+        self.assertEqual(1, len(finals))
+
+    def test_finalize_identical_content_creates_distinct_final_encounters(self) -> None:
+        thread = create_thread(self.records, goal="duplicate bodies")
+        body = _valid_session_body(title="Chemistry: Bonds", next_step="Continue.")
+        first_pending = create_pending_encounter(self.records, thread.id)
+        second_pending = create_pending_encounter(self.records, thread.id)
+        first_pending.write_text(body, encoding="utf-8")
+        second_pending.write_text(body, encoding="utf-8")
+        first = finalize_thread_encounter(self.records, thread.id, first_pending)
+        second = finalize_thread_encounter(self.records, thread.id, second_pending)
+        self.assertNotEqual(first.latest_encounter, second.latest_encounter)
+        sessions = threads_root(self.records) / thread.id / "sessions"
+        finals = [
+            path
+            for path in sessions.iterdir()
+            if path.is_file() and not path.name.startswith("pending-")
+        ]
+        self.assertEqual(2, len(finals))
 
     def test_finalize_rejects_malformed_record_without_mutating_metadata(self) -> None:
         thread = create_thread(self.records, goal="keep metadata")
@@ -344,47 +372,53 @@ class ThreadStorageTests(unittest.TestCase):
         with self.assertRaises(IntegrityError):
             create_pending_encounter(self.records, created.id)
 
-    def test_finalize_rejects_pending_already_referenced_by_metadata(self) -> None:
+    def test_load_thread_rejects_pending_latest_encounter_in_metadata(self) -> None:
         thread = create_thread(self.records, goal="referenced")
         pending = create_pending_encounter(self.records, thread.id)
         metadata_path = threads_root(self.records) / thread.id / "thread.json"
         payload = json.loads(metadata_path.read_text(encoding="utf-8"))
         payload["latest_encounter"] = pending.name
         metadata_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        pending.write_text(
-            _valid_session_body(title="Math: Referenced", next_step="Stop."),
-            encoding="utf-8",
-        )
         with self.assertRaises(IntegrityError):
-            finalize_thread_encounter(self.records, thread.id, pending)
+            load_thread(self.records, thread.id)
 
-    def test_finalize_succeeds_when_pending_cleanup_fails(self) -> None:
-        thread = create_thread(self.records, goal="cleanup optional")
+    def test_finalize_rollback_restores_pending_on_metadata_failure(self) -> None:
+        thread = create_thread(self.records, goal="rollback")
         pending = create_pending_encounter(self.records, thread.id)
         pending.write_text(
-            _valid_session_body(title="Science: Cleanup", next_step="Continue."),
+            _valid_session_body(title="Science: Rollback", next_step="Retry."),
             encoding="utf-8",
         )
-        with mock.patch("pathlib.Path.unlink", side_effect=OSError("busy")):
-            finalized = finalize_thread_encounter(self.records, thread.id, pending)
-        self.assertEqual("complete", finalized.status)
-
-    def test_finalize_retry_after_commit_avoids_duplicate_finals(self) -> None:
-        thread = create_thread(self.records, goal="retry")
-        pending = create_pending_encounter(self.records, thread.id)
-        body = _valid_session_body(title="Physics: Retry", next_step="Continue.")
-        pending.write_text(body, encoding="utf-8")
-        with mock.patch("pathlib.Path.unlink", side_effect=OSError("busy")):
-            first = finalize_thread_encounter(self.records, thread.id, pending)
-        second = finalize_thread_encounter(self.records, thread.id, pending)
-        self.assertEqual(first.latest_encounter, second.latest_encounter)
+        with mock.patch(
+            "socratic_learn.thread_storage._save_thread_metadata",
+            side_effect=IntegrityError("metadata publish failed"),
+        ):
+            with self.assertRaises(IntegrityError):
+                finalize_thread_encounter(self.records, thread.id, pending)
+        self.assertTrue(pending.is_file())
         sessions = threads_root(self.records) / thread.id / "sessions"
         finals = [
             path
             for path in sessions.iterdir()
             if path.is_file() and not path.name.startswith("pending-")
         ]
-        self.assertEqual(1, len(finals))
+        self.assertEqual([], finals)
+
+    def test_legacy_import_preserves_source_bytes_including_crlf(self) -> None:
+        legacy = self.records / "sessions" / "crlf-legacy.md"
+        source = (
+            _valid_session_body(
+                title="History: Ancient trade routes",
+                next_step="Map one additional route.",
+                session_date="2026-01-15",
+            ).replace("\n", "\r\n")
+        ).encode("utf-8")
+        legacy.write_bytes(source)
+        imported = import_legacy_session(self.records, legacy)
+        copied = (
+            threads_root(self.records) / imported.id / "sessions" / imported.latest_encounter
+        )
+        self.assertEqual(source, copied.read_bytes())
 
     def test_import_malformed_legacy_leaves_no_thread(self) -> None:
         legacy = self.records / "sessions" / "broken.md"
@@ -424,27 +458,6 @@ class ThreadStorageTests(unittest.TestCase):
         metadata_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         with self.assertRaises(IntegrityError):
             load_thread(self.records, created.id)
-
-    def test_finalize_removes_final_and_preserves_pending_on_metadata_failure(self) -> None:
-        thread = create_thread(self.records, goal="rollback")
-        pending = create_pending_encounter(self.records, thread.id)
-        pending.write_text(
-            _valid_session_body(title="Science: Rollback", next_step="Retry."),
-            encoding="utf-8",
-        )
-        with mock.patch(
-            "socratic_learn.thread_storage._save_thread_metadata",
-            side_effect=IntegrityError("metadata publish failed"),
-        ):
-            with self.assertRaises(IntegrityError):
-                finalize_thread_encounter(self.records, thread.id, pending)
-        self.assertTrue(pending.is_file())
-        finals = [
-            path
-            for path in (threads_root(self.records) / thread.id / "sessions").iterdir()
-            if path.is_file() and not path.name.startswith("pending-")
-        ]
-        self.assertEqual([], finals)
 
     def test_legacy_import_rejects_foreign_records_root(self) -> None:
         other = self.records.parent / "other-records"
