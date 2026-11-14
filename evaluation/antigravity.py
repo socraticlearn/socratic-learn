@@ -86,12 +86,12 @@ def initial_bootstrap(
     source_study_payload: str | None = None,
 ) -> str:
     """Return the public launcher's Antigravity bootstrap without duplicating it."""
+    launch_payload = goal if source_study_payload is None else source_study_payload
     return command_for(
         ADAPTERS["antigravity"],
         "agy",
         protocol,
-        goal,
-        source_study_payload=source_study_payload,
+        launch_payload,
     )[2]
 
 

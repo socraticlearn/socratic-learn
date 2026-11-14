@@ -4,14 +4,17 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from subprocess import CompletedProcess
 from unittest import mock
 
+import socratic_learn.launcher as launcher_module
 from socratic_learn.errors import FilesystemError, IntegrityError, UsageError
+from socratic_learn.hosts import command_for
 from socratic_learn.launcher import LaunchOptions, run_learning
 from socratic_learn.manifest import (
     SESSION_HEADINGS,
@@ -112,6 +115,45 @@ class LauncherTests(unittest.TestCase):
                 environ={"SOCRATIC_LEARN_HOME": temporary},
             )
             self.assertEqual(23, result)
+
+    def test_thread_is_marked_incomplete_before_child_launch(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            def inspect_before_launch(argv, **_kwargs):
+                checkpoint = _checkpoint_from_argv(argv)
+                records = checkpoint.parents[3]
+                thread_id = checkpoint.parents[1].name
+                self.assertEqual(
+                    "incomplete",
+                    load_thread(records, thread_id).status,
+                )
+                return CompletedProcess(argv, 0)
+
+            run_learning(
+                LaunchOptions("logic", "pi", False, Path.cwd()),
+                output=io.StringIO(),
+                which={"pi": "pi"}.get,
+                run_process=inspect_before_launch,
+                environ={"SOCRATIC_LEARN_HOME": temporary},
+            )
+
+    def test_command_failure_removes_new_unlaunched_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            with (
+                mock.patch(
+                    "socratic_learn.launcher.command_for",
+                    side_effect=UsageError("construction failed"),
+                ),
+                self.assertRaises(UsageError),
+            ):
+                run_learning(
+                    LaunchOptions("logic", "pi", False, Path.cwd()),
+                    output=io.StringIO(),
+                    which={"pi": "pi"}.get,
+                    environ={"SOCRATIC_LEARN_HOME": temporary},
+                )
+
+            records = Path(temporary) / "learning/.socratic-learn/workspace"
+            self.assertEqual((), list_threads(records))
 
     def test_no_agent_fails_before_goal_prompt_with_actionable_error(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -263,45 +305,67 @@ class LauncherTests(unittest.TestCase):
             root = Path(temporary)
             shim = root / "pi.cmd"
             counterpart = root / "pi.ps1"
-            receipt = root / "received.txt"
+            receiver = root / "receiver.py"
+            receipt = root / "received.bin"
+            argument_count = root / "argument-count.txt"
             side_effect = root / "injected.txt"
             shim.write_text(
                 f'@echo off\r\necho batch-ran> "{side_effect}"\r\n',
                 encoding="utf-8",
             )
             counterpart.write_text(
-                "[IO.File]::WriteAllText("
-                "$env:SOCRATIC_TEST_RECEIPT, $args[2], "
-                "(New-Object Text.UTF8Encoding($false)))\n",
+                "& $env:SOCRATIC_TEST_PYTHON "
+                "$env:SOCRATIC_TEST_RECEIVER $args\n"
+                "exit $LASTEXITCODE\n",
                 encoding="utf-8",
             )
-            goal = r"""learn & | < > ^ % ! " ' $() exactly"""
+            receiver.write_text(
+                "import os, pathlib, sys\n"
+                "pathlib.Path(os.environ['SOCRATIC_TEST_RECEIPT']).write_bytes("
+                "sys.argv[-1].encode('utf-8'))\n"
+                "pathlib.Path(os.environ['SOCRATIC_TEST_ARG_COUNT']).write_text("
+                "str(len(sys.argv) - 1), encoding='ascii')\n",
+                encoding="utf-8",
+            )
+            goal = """learn cafés & | < > ^ % ! " ' $() exactly\\"""
             environment = os.environ.copy()
             environment.update(
                 {
                     "SOCRATIC_LEARN_HOME": str(root / "home"),
+                    "SOCRATIC_TEST_ARG_COUNT": str(argument_count),
+                    "SOCRATIC_TEST_PYTHON": sys.executable,
                     "SOCRATIC_TEST_RECEIPT": str(receipt),
+                    "SOCRATIC_TEST_RECEIVER": str(receiver),
                 }
             )
+            original_command_for = command_for
+            expected_commands: list[tuple[str, ...]] = []
 
-            result = run_learning(
-                LaunchOptions(goal, "pi", False, root),
-                output=io.StringIO(),
-                which={"pi": str(shim)}.get,
-                run_process=lambda argv, **kwargs: subprocess.run(
-                    argv,
-                    env=environment,
-                    **kwargs,
-                ),
-                environ=environment,
-            )
+            def capture_command(*args, **kwargs):
+                command = original_command_for(*args, **kwargs)
+                expected_commands.append(command)
+                return command
+
+            with mock.patch(
+                "socratic_learn.launcher.command_for",
+                side_effect=capture_command,
+            ):
+                result = run_learning(
+                    LaunchOptions(goal, "pi", False, root),
+                    output=io.StringIO(),
+                    which={"pi": str(shim)}.get,
+                    run_process=lambda argv, **kwargs: subprocess.run(
+                        argv,
+                        env=environment,
+                        **kwargs,
+                    ),
+                    environ=environment,
+                )
 
             self.assertEqual(0, result)
-            received = receipt.read_text(encoding="utf-8")
-            self.assertEqual(
-                goal,
-                _control_from_argv(["pi", received])["thread"]["goal"],
-            )
+            self.assertEqual("3", argument_count.read_text(encoding="ascii"))
+            self.assertEqual(expected_commands[0][-1].encode("utf-8"), receipt.read_bytes())
+            self.assertEqual(goal, _control_from_argv(["pi", receipt.read_text("utf-8")])["thread"]["goal"])
             self.assertFalse(side_effect.exists())
 
     @unittest.skipUnless(os.name == "nt", "Windows shim policy runs on Windows")
@@ -549,6 +613,105 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(8, len(menus[1]))
             self.assertNotIn("View all", [choice.label for choice in menus[1]])
             self.assertIn("Resume the legacy task.", menus[0][1].detail)
+
+    def test_menu_skips_corrupt_entries_with_one_sanitized_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = prepare_personal_workspace(Path(temporary))
+            create_thread(workspace.records, goal="valid thread")
+            corrupt = (
+                threads_root(workspace.records)
+                / "00000000-0000-4000-8000-000000000099"
+            )
+            (corrupt / "sessions").mkdir(parents=True)
+            (corrupt / "thread.json").write_text("{broken", encoding="utf-8")
+            (workspace.records / "sessions/broken.md").write_text(
+                "not a session",
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            seen: list[str] = []
+
+            run_learning(
+                LaunchOptions(None, "pi", False, Path.cwd()),
+                input_fn=lambda prompt: "new topic",
+                output=output,
+                which={"pi": "pi"}.get,
+                run_process=lambda argv, **kwargs: CompletedProcess(argv, 0),
+                environ={"SOCRATIC_LEARN_HOME": temporary},
+                choose_item=lambda choices, **kwargs: (
+                    seen.extend(choice.label for choice in choices)
+                    or choices[0].value
+                ),
+                menu_is_interactive=lambda: False,
+            )
+
+            self.assertIn("valid thread", seen)
+            warnings = [
+                line for line in output.getvalue().splitlines()
+                if line.startswith("warning:")
+            ]
+            self.assertEqual(1, len(warnings))
+            self.assertIn("2", warnings[0])
+            self.assertNotIn("broken.md", warnings[0])
+
+    def test_mixed_menu_timestamp_ties_keep_stable_thread_order(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = prepare_personal_workspace(Path(temporary))
+            first_id = "00000000-0000-4000-8000-000000000001"
+            second_id = "00000000-0000-4000-8000-000000000002"
+            root = threads_root(workspace.records)
+            for thread_id, title in ((first_id, "first"), (second_id, "second")):
+                thread_dir = root / thread_id
+                (thread_dir / "sessions").mkdir(parents=True)
+                (thread_dir / "thread.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "id": thread_id,
+                            "provisional_title": title,
+                            "refined_title": None,
+                            "original_goal": title,
+                            "status": "active",
+                            "created_at": "2026-01-01T00:00:00Z",
+                            "updated_at": "2026-01-02T00:00:00Z",
+                            "latest_encounter": None,
+                            "next_step": "",
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+            legacy = workspace.records / "sessions/legacy.md"
+            legacy.write_text(
+                _valid_session_body(
+                    title="Legacy: Stable tie",
+                    next_step="Continue.",
+                ),
+                encoding="utf-8",
+            )
+            tied = datetime(2026, 1, 2, tzinfo=UTC).timestamp()
+            os.utime(legacy, (tied, tied))
+
+            items = launcher_module._stored_menu_items(
+                workspace.records,
+                output=io.StringIO(),
+            )
+
+            self.assertEqual(
+                [first_id, second_id],
+                [item.thread_id for item in items[:2]],
+            )
+            self.assertEqual("Legacy: Stable tie", items[2].title)
+
+    def test_menu_activity_date_uses_local_timezone(self) -> None:
+        local = timezone(timedelta(hours=-3))
+        self.assertEqual(
+            "2026-01-01",
+            launcher_module._local_activity_date(
+                "2026-01-02T01:30:00Z",
+                timezone=local,
+            ),
+        )
 
     def test_resume_uses_latest_complete_checkpoint_and_updates_title(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -824,30 +987,29 @@ class LauncherTests(unittest.TestCase):
                 ),
             )
 
-    def test_mark_and_discard_failures_do_not_mask_child_exit_code(self) -> None:
-        for failed_name in ("mark_thread_incomplete", "discard_pending_encounter"):
-            with self.subTest(failed_name=failed_name), tempfile.TemporaryDirectory() as temporary:
-                output = io.StringIO()
-                with mock.patch(
-                    f"socratic_learn.launcher.{failed_name}",
-                    side_effect=IntegrityError(f"credential-{failed_name}"),
-                ):
-                    result = run_learning(
-                        LaunchOptions("goal", "pi", False, Path.cwd()),
-                        output=output,
-                        which={"pi": "pi"}.get,
-                        run_process=lambda argv, **kwargs: CompletedProcess(argv, 31),
-                        environ={"SOCRATIC_LEARN_HOME": temporary},
-                    )
-                self.assertEqual(31, result)
-                self.assertIn("warning:", output.getvalue())
-                self.assertNotIn(f"credential-{failed_name}", output.getvalue())
+    def test_discard_failure_does_not_mask_child_exit_code(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = io.StringIO()
+            with mock.patch(
+                "socratic_learn.launcher.discard_pending_encounter",
+                side_effect=IntegrityError("credential-discard"),
+            ):
+                result = run_learning(
+                    LaunchOptions("goal", "pi", False, Path.cwd()),
+                    output=output,
+                    which={"pi": "pi"}.get,
+                    run_process=lambda argv, **kwargs: CompletedProcess(argv, 31),
+                    environ={"SOCRATIC_LEARN_HOME": temporary},
+                )
+            self.assertEqual(31, result)
+            self.assertIn("warning:", output.getvalue())
+            self.assertNotIn("credential-discard", output.getvalue())
 
     def test_cleanup_failures_preserve_interrupt_and_executable_disappearance(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             output = io.StringIO()
             with mock.patch(
-                "socratic_learn.launcher.mark_thread_incomplete",
+                "socratic_learn.launcher.discard_pending_encounter",
                 side_effect=IntegrityError("provider-interrupt"),
             ):
                 result = run_learning(
@@ -866,7 +1028,7 @@ class LauncherTests(unittest.TestCase):
             output = io.StringIO()
             with (
                 mock.patch(
-                    "socratic_learn.launcher.mark_thread_incomplete",
+                    "socratic_learn.launcher.discard_pending_encounter",
                     side_effect=IntegrityError("provider-disappeared"),
                 ),
                 self.assertRaises(FilesystemError) as raised,
@@ -893,7 +1055,7 @@ class LauncherTests(unittest.TestCase):
                     side_effect=primary,
                 ),
                 mock.patch(
-                    "socratic_learn.launcher.mark_thread_incomplete",
+                    "socratic_learn.launcher.discard_unlaunched_thread",
                     side_effect=IntegrityError("provider-cleanup-secret"),
                 ),
                 self.assertRaises(UsageError) as raised,

@@ -361,8 +361,7 @@ class EvaluationAntigravityTests(unittest.TestCase):
             ADAPTERS["antigravity"],
             "agy",
             protocol,
-            goal,
-            source_study_payload=payload,
+            payload,
         )
         self.assertEqual(public[2], initial_bootstrap(protocol, goal, payload))
         self.assertEqual(initial_bootstrap(protocol, goal), initial_bootstrap(protocol, goal, None))

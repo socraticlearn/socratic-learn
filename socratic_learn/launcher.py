@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import tzinfo
 import json
 import os
 from pathlib import Path
@@ -25,16 +26,17 @@ from .threads import (
     ThreadRecord,
     create_pending_encounter,
     create_thread,
+    discard_unlaunched_thread,
     discard_pending_encounter,
-    discover_legacy_sessions,
+    discover_menu_records,
     finalize_thread_encounter,
     import_legacy_session,
-    list_threads,
     load_thread,
     mark_thread_incomplete,
     parse_session_record,
     threads_root,
 )
+from .thread_schema import parse_utc_timestamp
 from .windows_security import (
     safe_regular_windows_file,
     trusted_windows_powershell,
@@ -85,9 +87,14 @@ def _safe_menu_text(text: str, *, fallback: str) -> str:
     return compact or fallback
 
 
-def _stored_menu_items(records: Path) -> tuple[_StoredMenuItem, ...]:
+def _stored_menu_items(
+    records: Path,
+    *,
+    output: TextIO,
+) -> tuple[_StoredMenuItem, ...]:
     items: list[_StoredMenuItem] = []
-    for summary in list_threads(records):
+    discovery = discover_menu_records(records)
+    for summary in discovery.threads:
         items.append(
             _StoredMenuItem(
                 value=f"thread:{summary.id}",
@@ -97,7 +104,7 @@ def _stored_menu_items(records: Path) -> tuple[_StoredMenuItem, ...]:
                 thread_id=summary.id,
             )
         )
-    for index, summary in enumerate(discover_legacy_sessions(records)):
+    for index, summary in enumerate(discovery.legacy):
         items.append(
             _StoredMenuItem(
                 value=f"legacy:{index}",
@@ -107,8 +114,34 @@ def _stored_menu_items(records: Path) -> tuple[_StoredMenuItem, ...]:
                 legacy_path=summary.path,
             )
         )
-    items.sort(key=lambda item: (item.updated_at, item.value), reverse=True)
+    issues: list[str] = []
+    if discovery.invalid_entries:
+        issues.append(f"skipped {discovery.invalid_entries} invalid saved entries")
+    if discovery.discarded_pending:
+        issues.append(
+            f"discarded {discovery.discarded_pending} invalid pending checkpoints"
+        )
+    if discovery.unsafe_pending:
+        issues.append(
+            f"left {discovery.unsafe_pending} unsafe pending checkpoints untouched"
+        )
+    if issues:
+        _write_warning(output, "warning: " + "; ".join(issues) + ".\n")
+    items.sort(
+        key=lambda item: parse_utc_timestamp(item.updated_at, field="updated_at"),
+        reverse=True,
+    )
     return tuple(items)
+
+
+def _local_activity_date(
+    timestamp: str,
+    *,
+    timezone: tzinfo | None = None,
+) -> str:
+    parsed = parse_utc_timestamp(timestamp, field="updated_at")
+    localized = parsed.astimezone() if timezone is None else parsed.astimezone(timezone)
+    return localized.date().isoformat()
 
 
 def _menu_choices(
@@ -120,7 +153,7 @@ def _menu_choices(
     for item in items:
         title = _safe_menu_text(item.title, fallback="Untitled session")
         next_step = _safe_menu_text(item.next_step, fallback="No next step saved")
-        activity_date = item.updated_at[:10]
+        activity_date = _local_activity_date(item.updated_at)
         choices.append(
             MenuChoice(
                 item.value,
@@ -141,7 +174,7 @@ def _choose_stored_item(
     output: TextIO,
     menu_is_interactive: Callable[[], bool] | None,
 ) -> _StoredMenuItem | None:
-    items = _stored_menu_items(records)
+    items = _stored_menu_items(records, output=output)
     recent = items[:5]
     include_view_all = len(items) > len(recent)
     choices = _menu_choices(recent, include_view_all=include_view_all)
@@ -325,8 +358,36 @@ def _mark_and_discard(*, records: Path, thread_id: str, pending: Path) -> None:
         raise first_error
 
 
-def _abandon_pending(*, records: Path, thread_id: str, pending: Path) -> None:
-    _mark_and_discard(records=records, thread_id=thread_id, pending=pending)
+def _discard_before_launch(
+    *,
+    records: Path,
+    thread_id: str,
+    pending: Path,
+    created_new: bool,
+) -> None:
+    if created_new:
+        discard_unlaunched_thread(records, thread_id, pending)
+    else:
+        discard_pending_encounter(records, thread_id, pending)
+
+
+def _escape_legacy_powershell_native_argument(value: str) -> str:
+    """Protect embedded quotes for Windows PowerShell 5.1 native forwarding."""
+    escaped: list[str] = []
+    backslashes = 0
+    for character in value:
+        if character == "\\":
+            backslashes += 1
+            continue
+        if character == '"':
+            escaped.append("\\" * ((backslashes * 2) + 1))
+            escaped.append('"')
+        else:
+            escaped.append("\\" * backslashes)
+            escaped.append(character)
+        backslashes = 0
+    escaped.append("\\" * backslashes)
+    return "".join(escaped)
 
 
 def _safe_windows_host_argv(
@@ -360,7 +421,8 @@ def _safe_windows_host_argv(
         "Bypass",
         "-File",
         str(script),
-        *argv[1:],
+        *argv[1:-1],
+        _escape_legacy_powershell_native_argument(argv[-1]),
     )
 
 
@@ -466,7 +528,19 @@ def run_learning(
             else prepare_personal_workspace(home)
         )
 
+    source_payload: str | None = None
+    if options.source is not None:
+        assert goal is not None
+        ingested = ingest_source(workspace.records, options.source)
+        bundle_path = ingested.bundle_path.resolve()
+        source_payload = build_source_study_payload(
+            learner_goal=goal,
+            index_path=bundle_path / "index.md",
+            metadata_path=bundle_path / "metadata.json",
+        )
+
     is_resume = selected_item is not None
+    created_new = selected_item is None
     if selected_item is None:
         assert goal is not None
         thread = create_thread(workspace.records, goal=goal)
@@ -477,39 +551,16 @@ def run_learning(
         thread = import_legacy_session(workspace.records, selected_item.legacy_path)
 
     pending = create_pending_encounter(workspace.records, thread.id)
-    source_payload: str | None = None
-    if options.source is not None:
-        assert goal is not None
-        try:
-            ingested = ingest_source(workspace.records, options.source)
-            bundle_path = ingested.bundle_path.resolve()
-            source_payload = build_source_study_payload(
-                learner_goal=goal,
-                index_path=bundle_path / "index.md",
-                metadata_path=bundle_path / "metadata.json",
-            )
-        except BaseException as primary:
-            _best_effort(
-                lambda: _abandon_pending(
-                    records=workspace.records,
-                    thread_id=thread.id,
-                    pending=pending,
-                ),
-                output=output,
-                primary=primary,
-            )
-            raise
-
-    launch_payload = _build_launch_payload(
-        thread=thread,
-        pending=pending,
-        records=workspace.records,
-        is_resume=is_resume,
-        source_study_payload=source_payload,
-    )
 
     host = detected[selected]
     try:
+        launch_payload = _build_launch_payload(
+            thread=thread,
+            pending=pending,
+            records=workspace.records,
+            is_resume=is_resume,
+            source_study_payload=source_payload,
+        )
         argv = command_for(
             host.adapter,
             host.executable,
@@ -519,10 +570,26 @@ def run_learning(
         argv = _safe_windows_host_argv(host.executable, argv, environ)
     except BaseException as primary:
         _best_effort(
-            lambda: _abandon_pending(
+            lambda: _discard_before_launch(
                 records=workspace.records,
                 thread_id=thread.id,
                 pending=pending,
+                created_new=created_new,
+            ),
+            output=output,
+            primary=primary,
+        )
+        raise
+
+    try:
+        mark_thread_incomplete(workspace.records, thread.id)
+    except BaseException as primary:
+        _best_effort(
+            lambda: _discard_before_launch(
+                records=workspace.records,
+                thread_id=thread.id,
+                pending=pending,
+                created_new=created_new,
             ),
             output=output,
             primary=primary,

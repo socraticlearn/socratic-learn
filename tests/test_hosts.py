@@ -163,3 +163,13 @@ class HostAdapterTests(unittest.TestCase):
                             protocol,
                             blank,
                         )
+
+    def test_command_for_rejects_obsolete_payload_replacement(self) -> None:
+        with self.assertRaises(TypeError):
+            command_for(
+                ADAPTERS["pi"],
+                "pi",
+                Path("protocol.md"),
+                "checkpoint-bearing payload",
+                source_study_payload="replacement that would drop checkpoint",
+            )

@@ -337,21 +337,16 @@ class ReadLauncherLifecycleTests(unittest.TestCase):
                     )
         self.assertFalse(spawned)
 
-    def test_source_exception_survives_cleanup_failure(self) -> None:
+    def test_source_exception_occurs_before_thread_cleanup_is_needed(self) -> None:
         primary = SourceError("original source failure")
         with tempfile.TemporaryDirectory() as temporary:
             output = io.StringIO()
-            with (
-                mock.patch(
-                    "socratic_learn.launcher.ingest_source",
-                    side_effect=primary,
-                ),
-                mock.patch(
-                    "socratic_learn.launcher.mark_thread_incomplete",
-                    side_effect=RuntimeError("provider-cleanup-secret"),
-                ),
-                self.assertRaises(SourceError) as raised,
-            ):
+            with mock.patch(
+                "socratic_learn.launcher.ingest_source",
+                side_effect=primary,
+            ), mock.patch(
+                "socratic_learn.launcher.mark_thread_incomplete",
+            ) as mark_incomplete, self.assertRaises(SourceError) as raised:
                 run_learning(
                     LaunchOptions(
                         "goal",
@@ -365,8 +360,10 @@ class ReadLauncherLifecycleTests(unittest.TestCase):
                     environ={"SOCRATIC_LEARN_HOME": temporary},
                 )
             self.assertIs(primary, raised.exception)
-            self.assertNotIn("provider-cleanup-secret", str(raised.exception))
-            self.assertIn("warning:", output.getvalue())
+            mark_incomplete.assert_not_called()
+            self.assertNotIn("warning:", output.getvalue())
+            records = Path(temporary) / "learning/.socratic-learn/workspace"
+            self.assertEqual((), list_threads(records))
 
     def test_explicit_read_creates_thread_and_pending_lifecycle(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

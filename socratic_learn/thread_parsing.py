@@ -22,10 +22,13 @@ _SESSION_HEADING_RE = re.compile(
     + re.escape(SESSION_RECORD_LEGACY_SEPARATOR)
     + r")(.+)\s*$"
 )
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
 def _subject_focus_title(topic: str) -> str:
     cleaned = topic.strip()
+    if cleaned == "Subject: Specific focus":
+        raise integrity("session record title must replace the literal placeholder")
     if ": " not in cleaned:
         raise integrity("session record title must use '<Subject>: <Specific focus>'")
     subject, focus = cleaned.split(": ", 1)
@@ -81,7 +84,7 @@ def _ordered_section_map(text: str) -> dict[str, str]:
 
     result: dict[str, str] = {}
     for heading in SESSION_HEADINGS:
-        body = "\n".join(sections[heading]).strip()
+        body = _HTML_COMMENT_RE.sub("", "\n".join(sections[heading])).strip()
         if not body:
             raise integrity(f"session record section {heading} must not be empty")
         result[heading] = body

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import hashlib
 import json
 import os
 import secrets
@@ -28,6 +29,8 @@ from .thread_paths import (
 )
 from .thread_schema import (
     LegacySessionSummary,
+    MenuDiscovery,
+    PendingRecovery,
     ParsedSessionRecord,
     ThreadRecord,
     ThreadSummary,
@@ -44,6 +47,7 @@ from .thread_schema import (
 _THREAD_FILENAME = "thread.json"
 _SESSIONS_DIRNAME = "sessions"
 _PENDING_PREFIX = "pending-"
+_LEGACY_SOURCE_FILENAME = "legacy-source.json"
 
 
 def threads_root(records: Path) -> Path:
@@ -124,6 +128,52 @@ def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
 
 def _save_thread_metadata(metadata_path: Path, record: ThreadRecord) -> None:
     _atomic_write_json(metadata_path, record_to_document(record))
+
+
+def _legacy_source_digest(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _legacy_source_marker(thread_dir: Path) -> Path:
+    return thread_dir / _LEGACY_SOURCE_FILENAME
+
+
+def _load_legacy_source_digest(thread_dir: Path) -> str | None:
+    marker = _legacy_source_marker(thread_dir)
+    if not marker.exists() and not marker.is_symlink():
+        return None
+    _require_regular_file(marker, "legacy import marker")
+    try:
+        document = json.loads(marker.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError, OSError) as error:
+        raise integrity("legacy import marker is not valid JSON", path=marker) from error
+    if (
+        type(document) is not dict
+        or set(document) != {"schema_version", "sha256"}
+        or document["schema_version"] != 1
+        or type(document["sha256"]) is not str
+        or len(document["sha256"]) != 64
+        or any(character not in "0123456789abcdef" for character in document["sha256"])
+    ):
+        raise integrity("legacy import marker is not valid", path=marker)
+    return document["sha256"]
+
+
+def _imported_legacy_threads(records: Path) -> dict[str, ThreadRecord]:
+    records_root = require_records_root(records)
+    threads = records_root / "threads"
+    if not threads.exists() and not threads.is_symlink():
+        return {}
+    threads = require_threads_root(records)
+    imported: dict[str, ThreadRecord] = {}
+    for entry in sorted(threads.iterdir(), key=lambda item: item.name):
+        if not _is_complete_thread_dir(entry):
+            raise integrity("thread entry is not valid", path=entry)
+        record = load_thread(records, entry.name)
+        digest = _load_legacy_source_digest(entry)
+        if digest is not None:
+            imported.setdefault(digest, record)
+    return imported
 
 
 def _is_complete_thread_dir(thread_dir: Path) -> bool:
@@ -264,6 +314,39 @@ def discard_pending_encounter(
         pending.unlink()
     except OSError as error:
         raise integrity("pending encounter record could not be removed", path=pending) from error
+
+
+def discard_unlaunched_thread(
+    records: Path,
+    thread_id: str,
+    encounter_path: Path,
+) -> None:
+    """Remove a new thread that never reached child process launch."""
+    validate_storage_ancestry(records, thread_id=thread_id)
+    thread_dir, sessions_dir, metadata_path = require_thread_workspace(
+        records,
+        thread_id,
+    )
+    current = load_thread(records, thread_id)
+    pending = resolve_pending_child(sessions_dir, encounter_path)
+    _require_regular_file(pending, "pending encounter record")
+    entries = tuple(sessions_dir.iterdir())
+    if (
+        current.latest_encounter is not None
+        or len(entries) != 1
+        or entries[0] != pending
+        or pending.stat(follow_symlinks=False).st_size != 0
+        or _legacy_source_marker(thread_dir).exists()
+        or _legacy_source_marker(thread_dir).is_symlink()
+    ):
+        raise integrity("unlaunched thread is not safe to remove", path=thread_dir)
+    try:
+        pending.unlink()
+        metadata_path.unlink()
+        sessions_dir.rmdir()
+        thread_dir.rmdir()
+    except OSError as error:
+        raise integrity("unlaunched thread could not be removed", path=thread_dir) from error
 
 
 def _extract_pending_token(pending_name: str) -> str:
@@ -432,6 +515,50 @@ def mark_thread_incomplete(records: Path, thread_id: str) -> ThreadRecord:
     return updated
 
 
+def recover_pending_encounters(records: Path, thread_id: str) -> PendingRecovery:
+    """Recover regular orphan checkpoints without following unsafe entries."""
+    validate_storage_ancestry(records, thread_id=thread_id)
+    load_thread(records, thread_id)
+    _thread_dir, sessions_dir, _metadata_path = require_thread_workspace(
+        records,
+        thread_id,
+    )
+    regular: list[tuple[int, str, Path]] = []
+    unsafe = 0
+    for entry in sessions_dir.iterdir():
+        if not (
+            entry.name.startswith(_PENDING_PREFIX)
+            and entry.name.endswith(".md")
+        ):
+            continue
+        try:
+            status = entry.stat(follow_symlinks=False)
+        except OSError:
+            unsafe += 1
+            continue
+        if entry.is_symlink() or not stat.S_ISREG(status.st_mode):
+            unsafe += 1
+            continue
+        regular.append((status.st_mtime_ns, entry.name, entry))
+
+    promoted = 0
+    discarded = 0
+    for _modified, _name, pending in sorted(regular):
+        try:
+            parse_session_record(pending.read_text(encoding="utf-8"))
+        except (IntegrityError, OSError, UnicodeError):
+            discard_pending_encounter(records, thread_id, pending)
+            discarded += 1
+            continue
+        finalize_thread_encounter(records, thread_id, pending)
+        promoted += 1
+    return PendingRecovery(
+        promoted=promoted,
+        discarded=discarded,
+        unsafe=unsafe,
+    )
+
+
 def list_threads(records: Path) -> tuple[ThreadSummary, ...]:
     records_root = require_records_root(records)
     threads = records_root / "threads"
@@ -467,6 +594,7 @@ def list_threads(records: Path) -> tuple[ThreadSummary, ...]:
 
 def discover_legacy_sessions(records: Path) -> tuple[LegacySessionSummary, ...]:
     records_root = require_records_root(records)
+    imported_digests = set(_imported_legacy_threads(records))
     legacy_dir = records_root / "sessions"
     if legacy_dir.is_symlink():
         raise integrity("legacy session records root must not be a symbolic link", path=legacy_dir)
@@ -482,11 +610,14 @@ def discover_legacy_sessions(records: Path) -> tuple[LegacySessionSummary, ...]:
             raise integrity("legacy session record could not be inspected", path=entry) from error
         _require_regular_file(entry, "legacy session record")
         try:
-            text = entry.read_text(encoding="utf-8")
+            payload = entry.read_bytes()
+            text = payload.decode("utf-8")
         except UnicodeDecodeError as error:
             raise integrity("legacy session is not valid UTF-8", path=entry) from error
         except OSError as error:
             raise integrity("legacy session could not be read", path=entry) from error
+        if _legacy_source_digest(payload) in imported_digests:
+            continue
 
         display_title, next_step, _refined = validate_legacy_session_content(text)
         status = entry.stat(follow_symlinks=False)
@@ -507,6 +638,90 @@ def discover_legacy_sessions(records: Path) -> tuple[LegacySessionSummary, ...]:
     return tuple(discovered)
 
 
+def discover_menu_records(records: Path) -> MenuDiscovery:
+    """Tolerantly discover menu entries while keeping strict APIs unchanged."""
+    records_root = require_records_root(records)
+    threads_dir = records_root / "threads"
+    if threads_dir.is_symlink():
+        raise integrity("thread records must not be a symbolic link", path=threads_dir)
+    legacy_dir = records_root / "sessions"
+    if legacy_dir.is_symlink() or not legacy_dir.is_dir():
+        raise integrity("legacy session records root is not safe", path=legacy_dir)
+
+    summaries: list[ThreadSummary] = []
+    imported_digests: set[str] = set()
+    invalid = 0
+    discarded_pending = 0
+    unsafe_pending = 0
+    if threads_dir.is_dir():
+        for entry in sorted(threads_dir.iterdir(), key=lambda item: item.name):
+            try:
+                if not _is_complete_thread_dir(entry):
+                    raise integrity("thread entry is not valid", path=entry)
+                record = load_thread(records, entry.name)
+                recovery = recover_pending_encounters(records, record.id)
+                discarded_pending += recovery.discarded
+                unsafe_pending += recovery.unsafe
+                record = load_thread(records, entry.name)
+                digest = _load_legacy_source_digest(entry)
+                if digest is not None:
+                    imported_digests.add(digest)
+                summaries.append(
+                    ThreadSummary(
+                        id=record.id,
+                        display_title=record.refined_title or record.provisional_title,
+                        updated_at=record.updated_at,
+                        next_step=record.next_step,
+                        status=record.status,
+                    )
+                )
+            except (IntegrityError, OSError, UnicodeError):
+                invalid += 1
+
+    legacy: list[LegacySessionSummary] = []
+    for entry in sorted(legacy_dir.iterdir(), key=lambda item: item.name):
+        try:
+            if entry.is_symlink():
+                raise integrity("legacy session record must not be a symbolic link", path=entry)
+            _require_regular_file(entry, "legacy session record")
+            payload = entry.read_bytes()
+            text = payload.decode("utf-8")
+            if _legacy_source_digest(payload) in imported_digests:
+                continue
+            display_title, next_step, _refined = validate_legacy_session_content(text)
+            status = entry.stat(follow_symlinks=False)
+            legacy.append(
+                LegacySessionSummary(
+                    path=entry,
+                    display_title=display_title,
+                    updated_at=format_utc_timestamp(
+                        datetime.fromtimestamp(status.st_mtime, tz=UTC)
+                    ),
+                    next_step=next_step,
+                )
+            )
+        except (IntegrityError, OSError, UnicodeError):
+            invalid += 1
+
+    summaries.sort(key=lambda item: item.id)
+    summaries.sort(
+        key=lambda item: parse_utc_timestamp(item.updated_at, field="updated_at"),
+        reverse=True,
+    )
+    legacy.sort(key=lambda item: item.path.name)
+    legacy.sort(
+        key=lambda item: parse_utc_timestamp(item.updated_at, field="updated_at"),
+        reverse=True,
+    )
+    return MenuDiscovery(
+        threads=tuple(summaries),
+        legacy=tuple(legacy),
+        invalid_entries=invalid,
+        discarded_pending=discarded_pending,
+        unsafe_pending=unsafe_pending,
+    )
+
+
 def import_legacy_session(records: Path, legacy_path: Path) -> ThreadRecord:
     validate_storage_ancestry(records)
     resolved = require_legacy_within_records(records, legacy_path)
@@ -522,9 +737,13 @@ def import_legacy_session(records: Path, legacy_path: Path) -> ThreadRecord:
     except UnicodeDecodeError as error:
         raise integrity("legacy session is not valid UTF-8", path=resolved) from error
 
+    digest = _legacy_source_digest(payload)
+    existing = _imported_legacy_threads(records).get(digest)
+    if existing is not None:
+        return existing
+
     display_title, next_step, refined_title = validate_legacy_session_content(text)
     session_date, _heading_title = parse_session_heading(text)
-    status = "complete" if refined_title is not None else "incomplete"
 
     record = create_thread(records, goal=display_title, provisional_title=display_title)
     thread_dir, sessions_dir, metadata_path = require_thread_workspace(records, record.id)
@@ -540,13 +759,17 @@ def import_legacy_session(records: Path, legacy_path: Path) -> ThreadRecord:
             provisional_title=record.provisional_title,
             refined_title=refined_title,
             original_goal=record.original_goal,
-            status=status,
+            status="complete",
             created_at=record.created_at,
             updated_at=utc_now_timestamp(),
             latest_encounter=final_path.name,
             next_step=next_step,
         )
         _save_thread_metadata(metadata_path, imported)
+        _atomic_write_json(
+            _legacy_source_marker(thread_dir),
+            {"schema_version": 1, "sha256": digest},
+        )
     except IntegrityError:
         _remove_tree(thread_dir)
         raise

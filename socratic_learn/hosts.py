@@ -10,8 +10,6 @@ from types import MappingProxyType
 from typing import Literal
 
 LAUNCH_PAYLOAD_DELIMITER = "\n\n--- SOCRATIC LEARN LAUNCH ---\n"
-# Kept as an import-compatible alias for source-study smoke tooling.
-READ_MODE_DELIMITER = LAUNCH_PAYLOAD_DELIMITER
 
 AgentName = Literal["pi", "claude", "antigravity"]
 
@@ -93,14 +91,8 @@ def command_for(
     executable: str,
     protocol: Path,
     launch_payload: str,
-    source_study_payload: str | None = None,
 ) -> tuple[str, ...]:
     """Build an argument vector without invoking a process."""
-    final_payload = (
-        launch_payload
-        if source_study_payload is None
-        else source_study_payload
-    )
-    if not final_payload.strip():
+    if not launch_payload.strip():
         raise ValueError("launch_payload must be nonblank")
-    return adapter.build_argv(executable, protocol, final_payload)
+    return adapter.build_argv(executable, protocol, launch_payload)

@@ -63,7 +63,7 @@ a delimiter:
 
 ```text
 Before responding, read and follow the Socratic Learn protocol whose path is encoded as JSON data:
-{"protocol_path":"PROTOCOL"}.
+{"protocol_path": "PROTOCOL"}.
 
 --- SOCRATIC LEARN LAUNCH ---
 ```

@@ -25,6 +25,7 @@ from socratic_learn.threads import (
     load_thread,
     mark_thread_incomplete,
     parse_session_record,
+    recover_pending_encounters,
     threads_root,
 )
 
@@ -380,6 +381,40 @@ class ThreadStorageTests(unittest.TestCase):
         self.assertFalse(imported.latest_encounter.startswith("pending-"))
         self.assertNotEqual(legacy.name, imported.latest_encounter)
 
+    def test_repeated_legacy_import_reuses_thread_and_hides_source(self) -> None:
+        legacy = self.records / "sessions" / "legacy.md"
+        legacy.write_text(
+            _valid_session_body(
+                title="History: Reused evidence",
+                next_step="Compare another source.",
+            ),
+            encoding="utf-8",
+        )
+
+        first = import_legacy_session(self.records, legacy)
+        second = import_legacy_session(self.records, legacy)
+
+        self.assertEqual(first.id, second.id)
+        self.assertTrue(legacy.is_file())
+        self.assertEqual(1, len(list_threads(self.records)))
+        self.assertEqual((), discover_legacy_sessions(self.records))
+
+    def test_legacy_without_refined_title_is_complete_prior_evidence(self) -> None:
+        legacy = self.records / "sessions" / "legacy.md"
+        legacy.write_text(
+            _valid_session_body(
+                title="History overview",
+                next_step="Choose a narrower question.",
+            ),
+            encoding="utf-8",
+        )
+
+        imported = import_legacy_session(self.records, legacy)
+
+        self.assertEqual("complete", imported.status)
+        self.assertIsNone(imported.refined_title)
+        self.assertEqual("History overview", imported.provisional_title)
+
     def test_import_legacy_renames_pending_like_sources_to_final_encounter(self) -> None:
         legacy = self.records / "sessions" / "pending-evil.md"
         legacy.write_text(
@@ -549,6 +584,76 @@ class ThreadStorageTests(unittest.TestCase):
                     next_step="Continue tomorrow.",
                 )
             )
+
+    def test_parse_rejects_literal_subject_focus_placeholder(self) -> None:
+        with self.assertRaises(IntegrityError):
+            parse_session_record(
+                _valid_session_body(
+                    title="Subject: Specific focus",
+                    next_step="Continue.",
+                )
+            )
+
+    def test_html_comments_do_not_make_required_section_nonempty(self) -> None:
+        text = _valid_session_body(
+            title="Logic: Comment-only evidence",
+            next_step="Continue.",
+        ).replace(
+            "## Outcome\nExplain one observable result.",
+            "## Outcome\n<!-- generated placeholder -->",
+        )
+        with self.assertRaises(IntegrityError):
+            parse_session_record(text)
+
+    def test_hard_kill_pending_checkpoint_is_recovered_on_next_load(self) -> None:
+        thread = create_thread(self.records, goal="recover after hard kill")
+        pending = create_pending_encounter(self.records, thread.id)
+        pending.write_text(
+            _valid_session_body(
+                title="Logic: Recovered checkpoint",
+                next_step="Resume from recovered evidence.",
+            ),
+            encoding="utf-8",
+        )
+        mark_thread_incomplete(self.records, thread.id)
+
+        recovery = recover_pending_encounters(self.records, thread.id)
+
+        recovered = load_thread(self.records, thread.id)
+        self.assertEqual(1, recovery.promoted)
+        self.assertEqual(0, recovery.discarded)
+        self.assertEqual("complete", recovered.status)
+        self.assertEqual("Logic: Recovered checkpoint", recovered.refined_title)
+        self.assertFalse(pending.exists())
+
+    def test_orphan_empty_and_malformed_pending_files_are_discarded(self) -> None:
+        thread = create_thread(self.records, goal="clean stale pending")
+        empty = create_pending_encounter(self.records, thread.id)
+        malformed = create_pending_encounter(self.records, thread.id)
+        malformed.write_text("not a session", encoding="utf-8")
+        mark_thread_incomplete(self.records, thread.id)
+
+        recovery = recover_pending_encounters(self.records, thread.id)
+
+        self.assertEqual(0, recovery.promoted)
+        self.assertEqual(2, recovery.discarded)
+        self.assertEqual(0, recovery.unsafe)
+        self.assertEqual([], list(empty.parent.iterdir()))
+
+    @unittest.skipUnless(_symlinks_supported(), "symlinks unavailable")
+    def test_orphan_pending_symlink_is_untouched_and_reported(self) -> None:
+        thread = create_thread(self.records, goal="unsafe pending")
+        sessions = threads_root(self.records) / thread.id / "sessions"
+        outside = self.records.parent / "outside.md"
+        outside.write_text("outside\n", encoding="utf-8")
+        pending = sessions / "pending-unsafe.md"
+        pending.symlink_to(outside)
+
+        recovery = recover_pending_encounters(self.records, thread.id)
+
+        self.assertEqual(1, recovery.unsafe)
+        self.assertTrue(pending.is_symlink())
+        self.assertEqual("outside\n", outside.read_text(encoding="utf-8"))
 
     def test_parse_rejects_duplicate_headings(self) -> None:
         text = _valid_session_body(
