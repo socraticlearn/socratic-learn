@@ -2,21 +2,37 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import unicodedata
 from typing import TextIO
 
 from .config import LauncherConfig, load_config, save_config
-from .errors import FilesystemError, UsageError
+from .errors import FilesystemError, IntegrityError, UsageError
 from .hosts import AgentName, DetectedHost, command_for, detect_hosts
 from .sources.ingest import ingest_source
 from .sources.model import SourceRequest
 from .sources.payload import build_source_study_payload
+from .terminal_menu import MenuChoice, choose_menu_item
+from .threads import (
+    ThreadRecord,
+    create_pending_encounter,
+    create_thread,
+    discard_pending_encounter,
+    discover_legacy_sessions,
+    finalize_thread_encounter,
+    import_legacy_session,
+    list_threads,
+    load_thread,
+    mark_thread_incomplete,
+    parse_session_record,
+    threads_root,
+)
 from .windows_security import (
     safe_regular_windows_file,
     trusted_windows_powershell,
@@ -35,6 +51,212 @@ class LaunchOptions:
     here: bool
     cwd: Path
     source: SourceRequest | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _StoredMenuItem:
+    value: str
+    title: str
+    updated_at: str
+    next_step: str
+    thread_id: str | None = None
+    legacy_path: Path | None = None
+
+
+_NEW_SESSION = "new-session"
+_VIEW_ALL = "view-all"
+_SOURCE_STUDY_DELIMITER = "\n\n--- SOCRATIC LEARN SOURCE STUDY ---\n"
+
+
+def _safe_menu_text(text: str, *, fallback: str) -> str:
+    rendered = "".join(
+        " " if unicodedata.category(character) == "Cc" else character
+        for character in text
+    )
+    compact = " ".join(rendered.split())
+    return compact or fallback
+
+
+def _stored_menu_items(records: Path) -> tuple[_StoredMenuItem, ...]:
+    items: list[_StoredMenuItem] = []
+    for summary in list_threads(records):
+        items.append(
+            _StoredMenuItem(
+                value=f"thread:{summary.id}",
+                title=summary.display_title,
+                updated_at=summary.updated_at,
+                next_step=summary.next_step,
+                thread_id=summary.id,
+            )
+        )
+    for index, summary in enumerate(discover_legacy_sessions(records)):
+        items.append(
+            _StoredMenuItem(
+                value=f"legacy:{index}",
+                title=summary.display_title,
+                updated_at=summary.updated_at,
+                next_step=summary.next_step,
+                legacy_path=summary.path,
+            )
+        )
+    items.sort(key=lambda item: (item.updated_at, item.value), reverse=True)
+    return tuple(items)
+
+
+def _menu_choices(
+    items: Sequence[_StoredMenuItem],
+    *,
+    include_view_all: bool,
+) -> tuple[MenuChoice, ...]:
+    choices: list[MenuChoice] = [MenuChoice(_NEW_SESSION, "New session")]
+    for item in items:
+        title = _safe_menu_text(item.title, fallback="Untitled session")
+        next_step = _safe_menu_text(item.next_step, fallback="No next step saved")
+        activity_date = item.updated_at[:10]
+        choices.append(
+            MenuChoice(
+                item.value,
+                title,
+                f"{activity_date} · {next_step}",
+            )
+        )
+    if include_view_all:
+        choices.append(MenuChoice(_VIEW_ALL, "View all"))
+    return tuple(choices)
+
+
+def _choose_stored_item(
+    records: Path,
+    *,
+    choose_item: Callable[..., str],
+    input_fn: Callable[[str], str],
+    output: TextIO,
+    menu_is_interactive: Callable[[], bool] | None,
+) -> _StoredMenuItem | None:
+    items = _stored_menu_items(records)
+    recent = items[:5]
+    include_view_all = len(items) > len(recent)
+    choices = _menu_choices(recent, include_view_all=include_view_all)
+    selection = choose_item(
+        choices,
+        output=output,
+        input_fn=input_fn,
+        is_interactive=menu_is_interactive,
+    )
+    if selection == _VIEW_ALL:
+        selection = choose_item(
+            _menu_choices(items, include_view_all=False),
+            output=output,
+            input_fn=input_fn,
+            is_interactive=menu_is_interactive,
+        )
+    if selection == _NEW_SESSION:
+        return None
+    by_value = {item.value: item for item in items}
+    try:
+        return by_value[selection]
+    except KeyError as error:
+        raise UsageError(
+            "session chooser returned an unknown selection",
+            remediation="select one of the displayed sessions",
+        ) from error
+
+
+def _encounter_path(records: Path, thread: ThreadRecord) -> Path | None:
+    if thread.latest_encounter is None:
+        return None
+    return (
+        threads_root(records)
+        / thread.id
+        / "sessions"
+        / thread.latest_encounter
+    ).resolve()
+
+
+def _build_launch_payload(
+    *,
+    thread: ThreadRecord,
+    pending: Path,
+    records: Path,
+    is_resume: bool,
+    source_study_payload: str | None,
+) -> str:
+    title = thread.refined_title or thread.provisional_title
+    if is_resume:
+        prior = _encounter_path(records, thread)
+        lines = [
+            "Resume this Socratic Learn thread.",
+            f"Selected thread title: {title}",
+        ]
+        if prior is None:
+            lines.extend(
+                [
+                    "No complete checkpoint exists for this thread; prior evidence "
+                    "must be re-established.",
+                    "Saved next step: No next step was saved.",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    f"Prior complete encounter: {prior}",
+                    f"Saved next step: {thread.next_step or 'No next step was saved.'}",
+                ]
+            )
+    else:
+        lines = [
+            "Start a new Socratic Learn thread.",
+            f"Thread title: {title}",
+            "Learner goal:",
+            thread.original_goal,
+        ]
+    lines.extend(
+        [
+            f"Checkpoint path: {pending.resolve()}",
+            "Before ending, write the shared session record to that exact checkpoint path.",
+            "Title contract: use '# Session: YYYY-MM-DD — <concise descriptive title>' "
+            "and keep the title specific to this learning thread.",
+        ]
+    )
+    payload = "\n".join(lines)
+    if source_study_payload is not None:
+        payload += _SOURCE_STUDY_DELIMITER + source_study_payload
+    return payload
+
+
+def _finish_encounter(
+    *,
+    records: Path,
+    thread_id: str,
+    pending: Path,
+    output: TextIO,
+) -> None:
+    try:
+        has_content = pending.is_file() and pending.stat().st_size > 0
+    except OSError:
+        has_content = False
+    if has_content:
+        try:
+            if pending.is_symlink():
+                raise IntegrityError("pending checkpoint is a symbolic link")
+            parse_session_record(pending.read_text(encoding="utf-8"))
+        except (IntegrityError, OSError, UnicodeError):
+            output.write(
+                "warning: the agent wrote a malformed checkpoint; "
+                "the thread remains incomplete.\n"
+            )
+        else:
+            finalize_thread_encounter(records, thread_id, pending)
+            return
+    mark_thread_incomplete(records, thread_id)
+    if pending.is_file() and not pending.is_symlink():
+        discard_pending_encounter(records, thread_id, pending)
+
+
+def _abandon_pending(*, records: Path, thread_id: str, pending: Path) -> None:
+    mark_thread_incomplete(records, thread_id)
+    if pending.is_file() and not pending.is_symlink():
+        discard_pending_encounter(records, thread_id, pending)
 
 
 def _safe_windows_host_argv(
@@ -101,6 +323,8 @@ def run_learning(
     which: Callable[[str], str | None] = shutil.which,
     run_process: Callable[..., subprocess.CompletedProcess[object]] = subprocess.run,
     environ: Mapping[str, str] | None = None,
+    choose_item: Callable[..., str] = choose_menu_item,
+    menu_is_interactive: Callable[[], bool] | None = None,
 ) -> int:
     """Select an installed host, prepare a workspace, and run the child."""
     detected = detect_hosts(which)
@@ -110,21 +334,38 @@ def run_learning(
             remediation="install Pi, Claude Code, or Antigravity and retry",
         )
 
+    home = launcher_home(environ)
+    workspace = None
+    selected_item: _StoredMenuItem | None = None
+    bare_launch = options.goal is None and options.source is None
+    if bare_launch:
+        workspace = (
+            prepare_here_workspace(options.cwd)
+            if options.here
+            else prepare_personal_workspace(home)
+        )
+        selected_item = _choose_stored_item(
+            workspace.records,
+            choose_item=choose_item,
+            input_fn=input_fn,
+            output=output,
+            menu_is_interactive=menu_is_interactive,
+        )
+
     goal = options.goal
-    if goal is None:
+    if goal is None and selected_item is None:
         prompt = (
             "What do you want to be able to do with this source?"
             if options.source is not None
             else "What do you want to learn? "
         )
         goal = input_fn(prompt)
-    if not goal.strip():
+    if goal is not None and not goal.strip():
         raise UsageError(
             "a learning goal is required",
             remediation="provide a non-empty learning goal",
         )
 
-    home = launcher_home(environ)
     config_path = home / "config.json"
     config = load_config(config_path)
 
@@ -149,40 +390,102 @@ def run_learning(
         )
         save_config(config_path, LauncherConfig(default_agent=selected))
 
-    workspace = (
-        prepare_here_workspace(options.cwd)
-        if options.here
-        else prepare_personal_workspace(home)
-    )
-
-    payload: str | None = None
-    if options.source is not None:
-        ingested = ingest_source(workspace.records, options.source)
-        bundle_path = ingested.bundle_path.resolve()
-        payload = build_source_study_payload(
-            learner_goal=goal,
-            index_path=bundle_path / "index.md",
-            metadata_path=bundle_path / "metadata.json",
+    if workspace is None:
+        workspace = (
+            prepare_here_workspace(options.cwd)
+            if options.here
+            else prepare_personal_workspace(home)
         )
 
-    host = detected[selected]
-    argv = command_for(
-        host.adapter,
-        host.executable,
-        workspace.protocol,
-        goal,
-        source_study_payload=payload,
+    is_resume = selected_item is not None
+    if selected_item is None:
+        assert goal is not None
+        thread = create_thread(workspace.records, goal=goal)
+    elif selected_item.thread_id is not None:
+        thread = load_thread(workspace.records, selected_item.thread_id)
+    else:
+        assert selected_item.legacy_path is not None
+        thread = import_legacy_session(workspace.records, selected_item.legacy_path)
+
+    pending = create_pending_encounter(workspace.records, thread.id)
+    source_payload: str | None = None
+    if options.source is not None:
+        assert goal is not None
+        try:
+            ingested = ingest_source(workspace.records, options.source)
+            bundle_path = ingested.bundle_path.resolve()
+            source_payload = build_source_study_payload(
+                learner_goal=goal,
+                index_path=bundle_path / "index.md",
+                metadata_path=bundle_path / "metadata.json",
+            )
+        except BaseException:
+            _abandon_pending(
+                records=workspace.records,
+                thread_id=thread.id,
+                pending=pending,
+            )
+            raise
+
+    launch_payload = _build_launch_payload(
+        thread=thread,
+        pending=pending,
+        records=workspace.records,
+        is_resume=is_resume,
+        source_study_payload=source_payload,
     )
-    argv = _safe_windows_host_argv(host.executable, argv, environ)
+
+    host = detected[selected]
+    try:
+        argv = command_for(
+            host.adapter,
+            host.executable,
+            workspace.protocol,
+            launch_payload,
+        )
+        argv = _safe_windows_host_argv(host.executable, argv, environ)
+    except BaseException:
+        _abandon_pending(
+            records=workspace.records,
+            thread_id=thread.id,
+            pending=pending,
+        )
+        raise
 
     try:
         result = run_process(list(argv), cwd=workspace.root, check=False)
     except KeyboardInterrupt:
+        _finish_encounter(
+            records=workspace.records,
+            thread_id=thread.id,
+            pending=pending,
+            output=output,
+        )
         return 130
     except FileNotFoundError as error:
+        _finish_encounter(
+            records=workspace.records,
+            thread_id=thread.id,
+            pending=pending,
+            output=output,
+        )
         raise FilesystemError(
             f"agent '{selected}' executable disappeared before launch",
             path=host.executable,
             remediation="restore the executable or select another agent",
         ) from error
+    except BaseException:
+        _finish_encounter(
+            records=workspace.records,
+            thread_id=thread.id,
+            pending=pending,
+            output=output,
+        )
+        raise
+    _finish_encounter(
+        records=workspace.records,
+        thread_id=thread.id,
+        pending=pending,
+        output=output,
+    )
     return result.returncode

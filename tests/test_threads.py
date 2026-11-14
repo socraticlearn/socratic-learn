@@ -17,6 +17,7 @@ from socratic_learn.threads import (
     THREAD_SCHEMA_VERSION,
     create_pending_encounter,
     create_thread,
+    discard_pending_encounter,
     discover_legacy_sessions,
     finalize_thread_encounter,
     import_legacy_session,
@@ -150,6 +151,21 @@ class ThreadStorageTests(unittest.TestCase):
         with self.assertRaises(IntegrityError):
             create_pending_encounter(self.records, thread.id, path=first)
         self.assertEqual("first encounter\n", first.read_text(encoding="utf-8"))
+
+    def test_discard_pending_encounter_removes_only_validated_pending_child(self) -> None:
+        thread = create_thread(self.records, goal="cleanup")
+        pending = create_pending_encounter(self.records, thread.id)
+        pending.write_text("malformed host output", encoding="utf-8")
+
+        discard_pending_encounter(self.records, thread.id, pending)
+
+        self.assertFalse(pending.exists())
+        with self.assertRaises(IntegrityError):
+            discard_pending_encounter(
+                self.records,
+                thread.id,
+                pending.parent / "not-pending.md",
+            )
 
     def test_finalize_publishes_exclusive_final_encounter(self) -> None:
         thread = create_thread(self.records, goal="platonic forms")

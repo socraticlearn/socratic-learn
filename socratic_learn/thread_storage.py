@@ -250,6 +250,22 @@ def create_pending_encounter(
     return destination
 
 
+def discard_pending_encounter(
+    records: Path,
+    thread_id: str,
+    encounter_path: Path,
+) -> None:
+    """Remove one validated pending encounter without touching final records."""
+    validate_storage_ancestry(records, thread_id=thread_id)
+    _thread_dir, sessions_dir, _metadata_path = require_thread_workspace(records, thread_id)
+    pending = resolve_pending_child(sessions_dir, encounter_path)
+    _require_regular_file(pending, "pending encounter record")
+    try:
+        pending.unlink()
+    except OSError as error:
+        raise integrity("pending encounter record could not be removed", path=pending) from error
+
+
 def _extract_pending_token(pending_name: str) -> str:
     if not pending_name.startswith(_PENDING_PREFIX) or not pending_name.endswith(".md"):
         raise integrity("pending encounter filename is not valid")

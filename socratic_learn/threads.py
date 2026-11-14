@@ -14,6 +14,7 @@ from .thread_paths import ensure_threads_root
 from .thread_storage import (
     create_pending_encounter,
     create_thread,
+    discard_pending_encounter,
     discover_legacy_sessions,
     finalize_thread_encounter,
     import_legacy_session,
@@ -31,6 +32,7 @@ __all__ = (
     "ThreadSummary",
     "create_pending_encounter",
     "create_thread",
+    "discard_pending_encounter",
     "discover_legacy_sessions",
     "ensure_threads_root",
     "finalize_thread_encounter",
