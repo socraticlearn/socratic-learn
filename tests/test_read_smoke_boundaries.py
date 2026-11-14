@@ -131,14 +131,14 @@ class PrivateBoundaryTests(unittest.TestCase):
             sibling.parent.mkdir(parents=True)
             sentinel = b"\x01"
             sibling.write_bytes(sentinel)
-            frozen = root / "socratic-frozen.exe"
-            frozen.write_bytes(b"MZ")
+            package_artifact = root / "package-artifact.exe"
+            package_artifact.write_bytes(b"MZ")
             context = PrivateBoundaryContext(
                 isolated_home=home,
                 repository=root,
                 sibling_sentinel=sibling,
                 sentinel_before=sentinel,
-                package_artifacts=(frozen,),
+                package_artifacts=(package_artifact,),
             )
             assert_private_bundle_boundary(context)
 

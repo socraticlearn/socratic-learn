@@ -583,14 +583,27 @@ TRACKED_EVALUATION_ASSET_ROOTS = (
 
 
 def markdown_files(root: Path) -> list[Path]:
-    return [
-        path
-        for path in root.rglob("*.md")
-        if path.is_file()
-        and ".git" not in path.relative_to(root).parts
-        and ".superpowers" not in path.relative_to(root).parts
-        and "workspace" not in path.relative_to(root).parts
-    ]
+    tracked, git_error = tracked_files(root)
+    files: list[Path] = []
+    for path in root.rglob("*.md"):
+        relative = path.relative_to(root)
+        # Untracked task-* files are controller scratch payloads, not repository
+        # documentation. Tracked task history and universal-task-* reports stay
+        # in validation.
+        untracked_controller_scratch = (
+            git_error is None
+            and relative.parent.as_posix() == ".superpowers/sdd"
+            and relative.name.startswith("task-")
+            and relative.as_posix() not in tracked
+        )
+        if (
+            path.is_file()
+            and ".git" not in relative.parts
+            and "workspace" not in relative.parts
+            and not untracked_controller_scratch
+        ):
+            files.append(path)
+    return files
 
 
 def without_fenced_code(text: str) -> str:
@@ -1370,7 +1383,7 @@ def validate_release_automation(root: Path) -> list[str]:
                 errors.append("pyproject.toml must use branded project URLs")
             if project_metadata.get("optional-dependencies", {}).get("build") != [
                 "build>=1.2,<2",
-                "twine>=6,<7",
+                "twine>=7,<8",
             ]:
                 errors.append(
                     "pyproject.toml build extra must include bounded build and Twine"

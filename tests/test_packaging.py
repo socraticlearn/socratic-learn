@@ -13,13 +13,17 @@ from unittest.mock import patch
 
 
 class PackagingTests(unittest.TestCase):
-    def test_build_backend_emits_twine_compatible_metadata(self) -> None:
+    def test_build_tools_are_bounded(self) -> None:
         root = Path(__file__).resolve().parents[1]
         project = tomllib.loads((root / "pyproject.toml").read_text("utf-8"))
 
         self.assertEqual(
-            ["hatchling>=1.27,<1.28"],
+            ["hatchling>=1.27,<2"],
             project["build-system"]["requires"],
+        )
+        self.assertEqual(
+            ["build>=1.2,<2", "twine>=7,<8"],
+            project["project"]["optional-dependencies"]["build"],
         )
 
     def test_project_urls_use_branded_repository(self) -> None:
@@ -52,7 +56,7 @@ class PackagingTests(unittest.TestCase):
             project["project"]["dependencies"],
         )
         self.assertEqual(
-            ["build>=1.2,<2", "twine>=6,<7"],
+            ["build>=1.2,<2", "twine>=7,<8"],
             project["project"]["optional-dependencies"]["build"],
         )
 

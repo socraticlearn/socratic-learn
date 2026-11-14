@@ -24,6 +24,7 @@ from tests.validate_repository import (
     UNSAFE_INSTALLER_PATTERNS,
     check_document_patterns,
     main,
+    markdown_files,
     markdown_section,
     mutate_once,
     normalize,
@@ -360,6 +361,38 @@ class RepositoryValidationTests(unittest.TestCase):
         temp, root = self.make_root()
         self.addCleanup(temp.cleanup)
         self.assertEqual([], validate(root))
+
+    def test_markdown_files_skip_only_untracked_task_controller_files(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            controller = root / ".superpowers" / "sdd"
+            controller.mkdir(parents=True)
+            scratch = controller / "task-3-review-package.md"
+            tracked_task = controller / "task-history.md"
+            universal = controller / "universal-task-3-report.md"
+            progress = controller / "progress.md"
+            for path in (scratch, tracked_task, universal, progress):
+                path.write_text("# record\n", encoding="utf-8")
+            tracked = {
+                tracked_task.relative_to(root).as_posix(),
+                universal.relative_to(root).as_posix(),
+            }
+
+            with patch(
+                "tests.validate_repository.tracked_files",
+                return_value=(tracked, None),
+            ):
+                discovered = {
+                    path.relative_to(root).as_posix()
+                    for path in markdown_files(root)
+                }
+
+            self.assertNotIn(scratch.relative_to(root).as_posix(), discovered)
+            self.assertIn(tracked_task.relative_to(root).as_posix(), discovered)
+            self.assertIn(universal.relative_to(root).as_posix(), discovered)
+            self.assertIn(progress.relative_to(root).as_posix(), discovered)
 
     def test_legacy_package_rejects_implementation_modules(self) -> None:
         temp, root = self.make_root()
@@ -2237,6 +2270,24 @@ class RepositoryValidationTests(unittest.TestCase):
         self.assertIn(
             "pyproject.toml must declare exactly "
             f"{RUNTIME_PDF_DEPENDENCY} as the runtime dependency",
+            validate(root),
+        )
+
+    def test_pyproject_requires_the_twine_7_build_extra(self) -> None:
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+        pyproject = root / "pyproject.toml"
+        pyproject.write_text(
+            pyproject.read_text(encoding="utf-8").replace(
+                "twine>=7,<8",
+                "twine>=6,<7",
+                1,
+            ),
+            encoding="utf-8",
+        )
+
+        self.assertIn(
+            "pyproject.toml build extra must include bounded build and Twine",
             validate(root),
         )
 
