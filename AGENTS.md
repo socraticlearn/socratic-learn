@@ -51,8 +51,11 @@ batch several claims across several analysis dimensions in a single prompt.
 Collect observable evidence through derivation or application. Apply the
 mathematical classification and sourcing rules for every claim they cover.
 On a resumed session, begin with one retrieval task from a recorded gap before
-introducing new material. When time is limited, narrow the route while
-preserving a final learner application and an honest progress checkpoint.
+introducing new material. When the launcher supplies a prior complete record on
+resume, treat that supplied prior record as progress evidence and never treat an
+interrupted launch or a session that ended without a valid checkpoint as
+demonstrated evidence. When time is limited, narrow the route while preserving a
+final learner application and an honest progress checkpoint.
 
 When a supplied source is present, read its index first and open only sections
 needed for the current step; return to the source index when the route changes.
@@ -71,12 +74,15 @@ preference, or personal trade-off.
 
 ## Close
 
-Produce the shared session record defined by the session protocol. When source
-study occurred, include what the source asserts, what within-source support was
-inspected, what remains externally unverified, and relevant source locations.
-When filesystem access exists, persist it and update the applicable private
-records under the active private workspace root described above. Otherwise
-return the complete Markdown record for the learner to save.
+Produce the shared session record defined by the session protocol. After the
+learner confirms the outcome, use a concise `<Subject>: <Specific focus>` title.
+When the launcher supplies a checkpoint path, write exactly one valid session
+record to that path at close. When source study occurred, include what the
+source asserts, what within-source support was inspected, what remains
+externally unverified, and relevant source locations. When filesystem access
+exists without a launcher checkpoint, persist it and update the applicable
+private records under the active private workspace root described above.
+Otherwise return the complete Markdown record for the learner to save.
 
 Use every documented capability fallback when its preferred capability is
 unavailable. Missing quiz, web, parallelism, rendering, storage, or memory

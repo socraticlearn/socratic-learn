@@ -113,6 +113,23 @@ directory as the learning project, run:
 socratic --here
 ```
 
+Bare `socratic` opens **New session**, the five most recent portable learning
+threads, and **View all** when more threads exist. Move with arrow keys on an
+interactive terminal, press Enter to choose, or answer the numbered fallback when
+the terminal cannot render a live menu. Pass a goal on the command line or use
+`socratic read ...` to bypass the chooser.
+
+Each title is a local learning thread with immutable encounters. Resume works
+across Pi, Claude Code, and Antigravity from structured summaries in your
+private workspace, not from provider chat history. An interrupted launch or an
+incomplete thread stays incomplete until the tutor writes a valid checkpoint;
+prior structured summaries remain available, but they are not treated as fresh
+demonstrated evidence after an interruption.
+
+Socratic Learn keeps session control, thread metadata, and structured summaries
+on disk under your personal or `--here` workspace. Launcher-owned memory does
+not store raw host transcripts, provider credentials, or provider ids.
+
 ## Choose an AI host
 
 Socratic Learn provides the learning method and private workspace. The launcher

@@ -1,5 +1,8 @@
-# Session: YYYY-MM-DD — Topic
-<!-- Replace the placeholders with the session date and learner-approved topic. -->
+# Session: YYYY-MM-DD — Subject: Specific focus
+<!-- After the learner confirms the outcome, replace Subject and Specific focus
+     with a concise <Subject>: <Specific focus> title. -->
+<!-- When the launcher supplies a checkpoint path, write exactly one valid record
+     to that supplied path at close with these headings. -->
 
 ## Outcome
 <!-- State the learner-approved performance and its completion criterion. -->

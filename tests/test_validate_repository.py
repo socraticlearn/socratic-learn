@@ -12,7 +12,10 @@ import unittest
 from unittest.mock import patch
 
 from tests.validate_repository import (
+    LAUNCHER_SESSION_CONTROL_REQUIREMENTS,
+    README_PORTABLE_SESSION_REQUIREMENTS,
     RUNTIME_PDF_DEPENDENCY,
+    SESSION_PROTOCOL_LAUNCHER_REQUIREMENTS,
     UNSAFE_INSTALLER_PATTERNS,
     main,
     normalize,
@@ -3470,6 +3473,45 @@ class RepositoryValidationTests(unittest.TestCase):
         self.assertIn("After a successful install or update", normalized)
         self.assertIn("staging and backup directories are removed", normalized)
         self.assertIn("preserves partial published paths", normalized)
+
+
+class PortableSessionMemoryDocumentationTests(unittest.TestCase):
+    def test_session_protocol_documents_launcher_checkpoint_contract(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        text = normalize(
+            (root / "core/session-protocol.md").read_text(encoding="utf-8")
+        ).lower()
+        for phrase in SESSION_PROTOCOL_LAUNCHER_REQUIREMENTS:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+
+    def test_readme_documents_portable_session_memory(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        text = normalize((root / "README.md").read_text(encoding="utf-8")).lower()
+        for phrase in README_PORTABLE_SESSION_REQUIREMENTS:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+
+    def test_launcher_adapters_document_session_control_contract(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        text = normalize(
+            (root / "docs/launcher-adapters.md").read_text(encoding="utf-8")
+        ).lower()
+        for phrase in LAUNCHER_SESSION_CONTROL_REQUIREMENTS:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+
+    def test_repository_validator_enforces_portable_session_contracts(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        errors = validate(root)
+        blocking = [
+            error
+            for error in errors
+            if "launcher checkpoint" in error
+            or "portable session memory" in error
+            or "session control contracts" in error
+        ]
+        self.assertEqual([], blocking)
 
 
 if __name__ == "__main__":

@@ -211,10 +211,13 @@ Do not infer mastery or preference from that evidence.
 
 When prior progress exists, begin with one retrieval task from a recorded gap
 before introducing new material. Do not begin by restating the saved answer.
-Use the result to decide whether to continue, repair a prerequisite, or revise
-the route. Record when the next evidence should be revisited as a date, a
-learner-owned milestone, or the next session; do not imply that a fixed
-interval suits every subject or learner.
+When the launcher supplies a prior complete encounter and session record on
+resume, treat that supplied prior record as the authoritative progress
+evidence. Do not treat an interrupted launch or a session that ended without a
+valid checkpoint as demonstrated evidence. Use the result to decide whether to
+continue, repair a prerequisite, or revise the route. Record when the next
+evidence should be revisited as a date, a learner-owned milestone, or the next
+session; do not imply that a fixed interval suits every subject or learner.
 
 If the learner states an available time budget, narrow the route scope without
 dropping the final learner application. Preview what can reasonably be completed,
@@ -229,7 +232,8 @@ Keep protocol orchestration internal. Do not announce stage names, phase names,
 diagnostic budgets, question counters, node or edge terminology, or successful
 file writes unless the learner explicitly asks about the method, remaining
 process, or stored records. Keep index paths, chunk paths, file-reading
-operations, and protocol labels private unless the learner asks or access
+operations, protocol labels, checkpoint paths, session control payloads,
+encounter paths, and thread storage private unless the learner asks or access
 fails. The numbered sections in this document organize agent behavior; they are
 not a script or learner-facing response template.
 
@@ -308,10 +312,13 @@ Close with the outcome, diagnostic evidence, the learning route traversed,
 concepts established, application evidence, remaining gaps, one next step, and
 sources. When studying a supplied source, also close with what the source
 asserts, what within-source support was inspected, what remains externally
-unverified, and relevant source locations. When filesystem access exists,
-update the applicable private records under `workspace/`. Otherwise return a
-Markdown record ready for the learner to save. Never place real learner data in
-tracked repository files.
+unverified, and relevant source locations. When the launcher supplies a
+checkpoint path, write exactly one valid session record to that path at close
+using the required headings from the session record contract below. When
+filesystem access exists without a launcher checkpoint, update the applicable
+private records under `workspace/`. Otherwise return a Markdown record ready
+for the learner to save. Never place real learner data in tracked repository
+files.
 
 Store confirmed preferences separately from demonstrated knowledge. Update the
 learner profile only with preferences, constraints, or personal context the
@@ -333,10 +340,12 @@ An unavailable capability changes the medium, not the learning protocol.
 
 ## Session record contract
 
-Persist or return one record with exactly these shared headings:
+Persist or return one record with exactly these shared headings. After the
+learner confirms the outcome, set the title in the heading to
+`<Subject>: <Specific focus>`.
 
 ```markdown
-# Session: YYYY-MM-DD — Topic
+# Session: YYYY-MM-DD — Subject: Specific focus
 ## Outcome
 ## Diagnostic evidence
 ## Learning route

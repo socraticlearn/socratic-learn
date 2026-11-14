@@ -76,7 +76,8 @@ and choose the smallest useful next task from the learner's answer.
 Keep protocol orchestration internal. Do not announce stage names, diagnostic
 budgets, or question counters unless the learner explicitly asks. Keep index
 paths, chunk paths, file-reading operations, and protocol labels private unless
-the learner asks or access fails.
+the learner asks or access fails. Also keep checkpoint paths, session control
+payloads, and encounter paths private unless the learner asks or access fails.
 
 ## Source study
 
@@ -110,20 +111,25 @@ Teach one route step at a time.
 ## Resume and time bounds
 
 When prior progress exists, begin with one retrieval task from a recorded gap
-before introducing new material. Record when the next evidence should be
-revisited. If the learner states an available time budget, narrow the route
-scope without dropping the final learner application and offer a plain-language progress
-checkpoint before time expires.
+before introducing new material. When the launcher supplies a prior complete
+encounter and session record on resume, treat that supplied prior record as the
+authoritative progress evidence. Do not treat an interrupted launch or a session
+that ended without a valid checkpoint as demonstrated evidence. Record when the
+next evidence should be revisited. If the learner states an available time
+budget, narrow the route scope without dropping the final learner application
+and offer a plain-language progress checkpoint before time expires.
 
 ## 5. Close and persist
 
-Close with diagnostic evidence, application evidence, and remaining gaps. When
-studying a source, close with what the source asserts, what within-source
-support was inspected, what remains externally unverified, and relevant source
-locations.
+When the launcher supplies a checkpoint path, write exactly one valid session record to that path at close using the required headings. Close with diagnostic evidence, application evidence, and remaining gaps. When studying a source, close with what the source asserts, what within-source support was inspected, what remains externally unverified, and relevant source locations.
 Store confirmed preferences separately from demonstrated knowledge. Never cite
 a preferred representation, confidence, or enjoyment as mastery evidence.
 Keep real learner data under `workspace/` and out of version control.
+
+## Session record contract
+
+After the learner confirms the outcome, set the title to
+`<Subject>: <Specific focus>`.
 
 ## Capability fallbacks
 
@@ -532,9 +538,7 @@ class ConformanceTests(unittest.TestCase):
     def test_requires_source_aware_closure(self) -> None:
         self.assert_only_code(
             minimal_bundle().replace(
-                "close with what the source asserts, what within-source\n"
-                "support was inspected, what remains externally unverified, and relevant source\n"
-                "locations.",
+                "close with what the source asserts, what within-source support was inspected, what remains externally unverified, and relevant source locations.",
                 "close with a general summary only.",
             ),
             "source-aware-closure",
@@ -552,7 +556,7 @@ class ConformanceTests(unittest.TestCase):
     def test_source_closure_requires_inspected_within_source_support(self) -> None:
         self.assert_only_code(
             minimal_bundle().replace(
-                "what within-source\nsupport was inspected, ",
+                "what within-source support was inspected, ",
                 "",
             ),
             "source-aware-closure",
@@ -570,7 +574,7 @@ class ConformanceTests(unittest.TestCase):
     def test_source_closure_requires_relevant_source_locations(self) -> None:
         self.assert_only_code(
             minimal_bundle().replace(
-                "and relevant source\nlocations.",
+                "and relevant source locations.",
                 ".",
             ),
             "source-aware-closure",
@@ -922,7 +926,7 @@ class ConformanceTests(unittest.TestCase):
     def test_requires_time_budget_to_narrow_scope_not_evidence(self) -> None:
         self.assert_only_code(
             minimal_bundle().replace(
-                "narrow the route\nscope without dropping the final learner application",
+                "narrow the route scope without dropping the final learner application",
                 "drop the final learner application to save time",
             ),
             "time-bounded-scope",
@@ -981,6 +985,15 @@ class ConformanceTests(unittest.TestCase):
                 "preference-not-prerequisite-evidence",
                 "resumable-retrieval",
                 "time-bounded-scope",
+            }.issubset(REQUIRED_DIAGNOSTIC_CODES)
+        )
+
+    def test_required_diagnostic_codes_include_launcher_session_memory_gates(self) -> None:
+        self.assertTrue(
+            {
+                "launcher-checkpoint-close",
+                "session-title-subject-focus",
+                "launcher-resume-evidence-boundary",
             }.issubset(REQUIRED_DIAGNOSTIC_CODES)
         )
 

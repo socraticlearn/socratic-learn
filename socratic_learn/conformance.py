@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 
 
-CONFORMANCE_CONTRACT_VERSION = 4
+CONFORMANCE_CONTRACT_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -333,10 +333,50 @@ _CONTRACTS = (
                 "file-reading",
             ),
             ("protocol labels",),
+            ("checkpoint path",),
+            ("session control",),
+            ("encounter path",),
         ),
         "learner-facing dialogue exposes protocol orchestration",
         "keep stages, budgets, counters, index paths, file-reading, and protocol labels "
         "internal unless the learner asks",
+    ),
+    _Contract(
+        "launcher-checkpoint-close",
+        "core/session-protocol.md",
+        (
+            ("launcher supplies a checkpoint path",),
+            ("exactly one valid session record",),
+            ("at close",),
+            ("required headings",),
+        ),
+        "launcher sessions do not require one valid checkpoint record at close",
+        "write exactly one valid session record with required headings to the "
+        "launcher-supplied checkpoint path at close",
+    ),
+    _Contract(
+        "session-title-subject-focus",
+        "core/session-protocol.md",
+        (
+            ("confirms the outcome",),
+            ("<subject>: <specific focus>",),
+        ),
+        "session titles do not use the subject and specific focus pattern after outcome confirmation",
+        "set the session title to '<Subject>: <Specific focus>' after the learner confirms the outcome",
+    ),
+    _Contract(
+        "launcher-resume-evidence-boundary",
+        "core/session-protocol.md",
+        (
+            ("supplied prior record",),
+            ("without a valid checkpoint",),
+            ("do not treat",),
+            ("demonstrated evidence",),
+            ("interrupted",),
+        ),
+        "launcher resume sessions may treat interrupted attempts as demonstrated evidence",
+        "use supplied prior records on resume and never treat interrupted or "
+        "no-checkpoint attempts as demonstrated evidence",
     ),
     _Contract(
         "vocabulary-readiness",

@@ -1,7 +1,7 @@
 {
   "bundle": {
     "path": "socratic-learn.prompt.md",
-    "sha256": "b260412ddde39b62c17d44eca0ad94e93cf2087100ae6b8177384fcc98b618b4"
+    "sha256": "2a876deef635beabc85af39735ee3bc86b89b9ed46adc5a346b621e3296fee2c"
   },
   "capability_fallbacks": {
     "cross_session_memory": "Ask for a prior summary and state what is unknown.",
@@ -23,6 +23,8 @@
       "exposition-fallback",
       "focused-learner-task",
       "graduated-support",
+      "launcher-checkpoint-close",
+      "launcher-resume-evidence-boundary",
       "mathematical-assumptions-classification",
       "observable-outcome",
       "preference-mastery-separation",
@@ -32,6 +34,7 @@
       "responsive-socratic-follow-up",
       "resumable-retrieval",
       "session-support-calibration",
+      "session-title-subject-focus",
       "silent-orchestration",
       "silent-self-review",
       "source-aware-closure",
@@ -46,7 +49,7 @@
       "vocabulary-readiness",
       "volatile-primary-source-verification"
     ],
-    "version": 4
+    "version": 5
   },
   "language": "en",
   "product": "socratic-learn",
@@ -69,7 +72,7 @@
     },
     {
       "path": "core/session-protocol.md",
-      "sha256": "8c171bd15a09ad15d05ad34c14b894483b13cbca3fe61456e17e328e47343816"
+      "sha256": "bd724a3e238f2ac63ad86723e6524d061f50f7d46331ef368e117520969a5a83"
     },
     {
       "path": "core/assessment.md",

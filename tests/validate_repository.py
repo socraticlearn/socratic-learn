@@ -255,6 +255,44 @@ README_LAUNCHER_REQUIREMENTS = (
     "pi, claude code, and antigravity",
     "cursor remains a project integration",
 )
+SESSION_PROTOCOL_LAUNCHER_REQUIREMENTS = (
+    "launcher supplies a checkpoint path",
+    "exactly one valid session record",
+    "at close",
+    "<subject>: <specific focus>",
+    "supplied prior record",
+    "without a valid checkpoint",
+    "do not treat",
+    "demonstrated evidence",
+    "interrupted",
+    "checkpoint path",
+    "session control",
+)
+README_PORTABLE_SESSION_REQUIREMENTS = (
+    "new session",
+    "view all",
+    "arrow",
+    "numbered",
+    "bypass",
+    "socratic read",
+    "learning thread",
+    "immutable",
+    "structured summaries",
+    "from provider chat history",
+    "provider ids",
+    "interrupted",
+    "incomplete",
+)
+LAUNCHER_SESSION_CONTROL_REQUIREMENTS = (
+    "session control",
+    "checkpoint_path",
+    "launch payload",
+    "prior_complete_encounter_path",
+    "host-independent",
+    "structured session summaries",
+    "--- socratic learn session control (json) ---",
+    "socratic learn launch",
+)
 NATIVE_RELEASE_CAVEAT = (
     "native installation is available only after github release v0.1.0 "
     "is published."
@@ -1410,6 +1448,11 @@ def validate(root: Path) -> list[str]:
             for requirement in README_LAUNCHER_REQUIREMENTS
         ):
             errors.append("README.md is missing public launcher onboarding")
+        if not all(
+            requirement in normalized_readme
+            for requirement in README_PORTABLE_SESSION_REQUIREMENTS
+        ):
+            errors.append("README.md is missing portable session memory guidance")
         quick_start = readme_text.split("## Quick start", 1)
         quick_start_text = (
             quick_start[1].split("## Choose an AI host", 1)[0]
@@ -1483,6 +1526,19 @@ def validate(root: Path) -> list[str]:
                 f"{relative} contains unsafe or mutable installer instructions"
             )
 
+    session_protocol = root / "core/session-protocol.md"
+    if session_protocol.is_file():
+        protocol_text = normalize(
+            session_protocol.read_text(encoding="utf-8")
+        ).lower()
+        if not all(
+            requirement in protocol_text
+            for requirement in SESSION_PROTOCOL_LAUNCHER_REQUIREMENTS
+        ):
+            errors.append(
+                "core/session-protocol.md is missing launcher checkpoint contracts"
+            )
+
     launcher_adapters = root / "docs/launcher-adapters.md"
     if launcher_adapters.is_file():
         launcher_text = normalize(
@@ -1494,6 +1550,13 @@ def validate(root: Path) -> list[str]:
         ):
             errors.append(
                 "docs/launcher-adapters.md is missing launcher adapter contracts"
+            )
+        if not all(
+            requirement in launcher_text
+            for requirement in LAUNCHER_SESSION_CONTROL_REQUIREMENTS
+        ):
+            errors.append(
+                "docs/launcher-adapters.md is missing session control contracts"
             )
 
     legacy_package = root / "learning_tutor"
