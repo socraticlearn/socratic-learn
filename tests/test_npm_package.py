@@ -100,11 +100,21 @@ class NpmPackageBuildTests(unittest.TestCase):
             parse_vendor_lock(
                 "pypdf==7.1.0 "
                 "--hash=sha256:47cca6b24bdcf4c4d65b5f7b8b972535c61710a061261e737688777cfd9a7bfb "
+                "# via cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+            )
+
+    def test_rejects_multiple_hashes_for_the_same_requirement(self) -> None:
+        from tools.build_npm_package import parse_vendor_lock
+
+        with self.assertRaises(ValueError):
+            parse_vendor_lock(
+                "pypdf==7.1.0 "
+                "--hash=sha256:47cca6b24bdcf4c4d65b5f7b8b972535c61710a061261e737688777cfd9a7bfb "
                 "--hash=sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
             )
 
     def test_npm_pack_produces_single_tarball_with_required_files(self) -> None:
-        from tools.build_npm_package import build_npm_package
+        from tools.build_npm_package import build_npm_package, validate_packed_tarball
 
         wheel = self._build_release_wheel()
         with tempfile.TemporaryDirectory() as workspace:
@@ -126,11 +136,19 @@ class NpmPackageBuildTests(unittest.TestCase):
 
             tarballs = sorted(out.glob("*.tgz"))
             self.assertEqual(len(tarballs), 1)
+            validate_packed_tarball(tarballs[0], npm_dir)
             names = _tarball_member_names(tarballs[0])
             self.assertIn("package/bin/socratic.js", names)
             self.assertIn("package/lib/python-runtime.js", names)
             self.assertIn("package/vendor/socratic_learn/__init__.py", names)
             self.assertIn("package/vendor/pypdf/__init__.py", names)
+            self.assertFalse(any("/vendor/bin/" in name for name in names))
+            self.assertFalse(any("/vendor/Scripts/" in name for name in names))
+            self.assertFalse(any(name.endswith(".exe") for name in names))
+            self.assertFalse(any(name.endswith(".pyc") for name in names))
+            self.assertFalse(any("__pycache__" in name for name in names))
+            self.assertFalse(any("/test/" in name for name in names))
+            self.assertFalse(any(name.endswith(".test.js") for name in names))
 
     def _build_release_wheel(self) -> Path:
         temp_dist = Path(tempfile.mkdtemp(prefix="npm-wheel-"))

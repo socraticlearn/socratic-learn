@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import importlib.metadata
 import json
 import re
 import shutil
 import subprocess
 import sys
-import tempfile
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -110,6 +109,53 @@ def vendor_inventory(vendor_dir: Path) -> list[str]:
     return entries
 
 
+_FORBIDDEN_TARBALL_MARKERS = (
+    "/vendor/bin/",
+    "/vendor/Scripts/",
+    "__pycache__/",
+    "/test/",
+)
+_FORBIDDEN_TARBALL_SUFFIXES = (".exe", ".pyc", ".test.js")
+
+
+def validate_packed_tarball(tarball: Path, npm_cli_dir: Path) -> None:
+    package = json.loads((npm_cli_dir / "package.json").read_text("utf-8"))
+    allowed_roots = {f"package/{entry.rstrip('/')}" for entry in package["files"]}
+    allowed_roots.add("package/package.json")
+
+    with tarfile.open(tarball, "r:gz") as archive:
+        names = [
+            member.name.replace("\\", "/")
+            for member in archive.getmembers()
+            if member.isfile()
+        ]
+
+    for name in names:
+        if not any(name == root or name.startswith(f"{root}/") for root in allowed_roots):
+            raise ValueError(f"unexpected tarball path: {name}")
+        lowered = name.lower()
+        for marker in _FORBIDDEN_TARBALL_MARKERS:
+            if marker in lowered:
+                raise ValueError(f"forbidden tarball path: {name}")
+        if name.endswith(_FORBIDDEN_TARBALL_SUFFIXES):
+            raise ValueError(f"forbidden tarball suffix: {name}")
+
+    for entry in package["files"]:
+        prefix = f"package/{entry.rstrip('/')}"
+        if entry.endswith("/"):
+            if not any(name.startswith(f"{prefix}/") for name in names):
+                raise ValueError(f"missing packaged directory: {prefix}/")
+        elif not any(name == prefix or name.startswith(f"{prefix}/") for name in names):
+            raise ValueError(f"missing packaged path: {prefix}")
+
+
+def remove_vendor_scripts(vendor_dir: Path) -> None:
+    for directory in ("bin", "Scripts"):
+        scripts_dir = vendor_dir / directory
+        if scripts_dir.exists():
+            shutil.rmtree(scripts_dir)
+
+
 def remove_bytecode(vendor_dir: Path) -> None:
     for cache in vendor_dir.rglob("__pycache__"):
         shutil.rmtree(cache, ignore_errors=True)
@@ -164,9 +210,7 @@ def populate_vendor(
         ]
     )
     remove_bytecode(vendor_dir)
-    scripts_dir = vendor_dir / "bin"
-    if scripts_dir.exists():
-        shutil.rmtree(scripts_dir)
+    remove_vendor_scripts(vendor_dir)
     return vendor_inventory(vendor_dir)
 
 
@@ -232,15 +276,9 @@ def build_npm_package(
     if not run_commands:
         return output_dir
 
-    return npm_pack(npm_cli_dir, output_dir)
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    tarball = npm_pack(npm_cli_dir, output_dir)
+    validate_packed_tarball(tarball, npm_cli_dir)
+    return tarball
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -20,39 +20,28 @@ const MIN_PYTHON_VERSION = Object.freeze({ major: 3, minor: 11 });
 const PYTHON_DOWNLOAD_URL = 'https://www.python.org/downloads/';
 const VERSION_ARGS = ['--version'];
 
-const PLATFORM_CANDIDATES = {
-  win32: [
-    { executable: 'py', args: ['-3.13'] },
-    { executable: 'py', args: ['-3.12'] },
-    { executable: 'py', args: ['-3.11'] },
-    { executable: 'python3.13', args: [] },
-    { executable: 'python3.12', args: [] },
-    { executable: 'python3.11', args: [] },
+function interpreterCandidatesForPlatform(platform) {
+  if (platform === 'win32') {
+    return [
+      { executable: 'py', args: ['-3'] },
+      { executable: 'python3', args: [] },
+      { executable: 'python', args: [] },
+    ];
+  }
+  return [
     { executable: 'python3', args: [] },
     { executable: 'python', args: [] },
-  ],
-  darwin: [
-    { executable: 'python3.13', args: [] },
-    { executable: 'python3.12', args: [] },
-    { executable: 'python3.11', args: [] },
-    { executable: 'python3', args: [] },
-    { executable: 'python', args: [] },
-  ],
-  linux: [
-    { executable: 'python3.13', args: [] },
-    { executable: 'python3.12', args: [] },
-    { executable: 'python3.11', args: [] },
-    { executable: 'python3', args: [] },
-    { executable: 'python', args: [] },
-  ],
-};
+  ];
+}
 
-function parseVersionTuple(output) {
-  const match = /Python\s+(\d+)\.(\d+)\.(\d+)/i.exec(output);
+function parseVersionTuple(stdout, stderr = '') {
+  const output = `${stdout ?? ''}\n${stderr ?? ''}`;
+  const match = /Python\s+(\d+)\.(\d+)(?:\.(\d+))?/i.exec(output);
   if (!match) {
     return null;
   }
-  return [Number(match[1]), Number(match[2]), Number(match[3])];
+  const patch = match[3] === undefined ? 0 : Number(match[3]);
+  return [Number(match[1]), Number(match[2]), patch];
 }
 
 function versionMeetsMinimum(version, minimum = MIN_PYTHON_VERSION) {
@@ -75,12 +64,8 @@ function buildPythonPath(vendorDir, existingPythonPath) {
 function buildPythonEnv(baseEnv, vendorDir, existingPythonPath) {
   return {
     ...baseEnv,
-    PYTHONPATH: buildPythonPath(vendorDir, existingPythonPath),
+    PYTHONPATH: buildPythonPath(vendorDir, existingPythonPath ?? baseEnv.PYTHONPATH),
   };
-}
-
-function describeProbeFailure(probe) {
-  return probe.status;
 }
 
 function formatVersion(version) {
@@ -112,12 +97,12 @@ function createPythonRuntime(deps = {}) {
 
   async function probeCandidate(candidate) {
     try {
-      const { stdout } = await execFile(
+      const { stdout, stderr } = await execFile(
         candidate.executable,
         [...candidate.args, ...VERSION_ARGS],
         { windowsHide: true },
       );
-      const version = parseVersionTuple(String(stdout));
+      const version = parseVersionTuple(String(stdout), String(stderr));
       if (!version) {
         return { status: 'unusable', candidate };
       }
@@ -153,7 +138,7 @@ function createPythonRuntime(deps = {}) {
       };
     }
 
-    const candidates = PLATFORM_CANDIDATES[platform] ?? PLATFORM_CANDIDATES.linux;
+    const candidates = interpreterCandidatesForPlatform(platform);
     let sawTooOld = null;
     for (const candidate of candidates) {
       const probe = await probeCandidate(candidate);
@@ -185,7 +170,7 @@ module.exports = {
   buildPythonEnv,
   buildPythonPath,
   createPythonRuntime,
-  describeProbeFailure,
+  interpreterCandidatesForPlatform,
   parseVersionTuple,
   versionMeetsMinimum,
 };

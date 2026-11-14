@@ -31,7 +31,7 @@ function createLauncher(deps = {}) {
       interpreter = await resolveInterpreter();
     } catch (error) {
       writeStderr(`${error.message}\n`);
-      return 1;
+      return { status: 'exited', code: 1 };
     }
 
     const pythonArgs = [
@@ -50,23 +50,21 @@ function createLauncher(deps = {}) {
 
     const cleanup = registerSignalHandlers(child, { forwardSignal });
 
-  return await new Promise((resolve) => {
+    return await new Promise((resolve) => {
       child.on('exit', (code, signal) => {
         cleanup();
         if (signal) {
           if (forwardSignal) {
             forwardSignal(signal);
-          } else {
-            process.kill(process.pid, signal);
           }
-          resolve(null);
+          resolve({ status: 'signaled', signal });
           return;
         }
-        resolve(code ?? 1);
+        resolve({ status: 'exited', code: code ?? 1 });
       });
       child.on('error', () => {
         cleanup();
-        resolve(1);
+        resolve({ status: 'exited', code: 1 });
       });
     });
   }
@@ -80,6 +78,9 @@ function _defaultSignalHandlers(child, { forwardSignal }) {
       child.kill(signal);
     } catch {
       // Ignore invalid signal delivery attempts on unsupported platforms.
+    }
+    if (forwardSignal) {
+      forwardSignal(signal);
     }
   };
 

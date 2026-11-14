@@ -6,11 +6,10 @@ const path = require('node:path');
 
 const {
   MIN_PYTHON_VERSION,
-  PYTHON_DOWNLOAD_URL,
   buildPythonEnv,
   buildPythonPath,
   createPythonRuntime,
-  describeProbeFailure,
+  interpreterCandidatesForPlatform,
   parseVersionTuple,
   versionMeetsMinimum,
 } = require('../lib/python-runtime.js');
@@ -27,9 +26,11 @@ describe('parseVersionTuple', () => {
 });
 
 describe('versionMeetsMinimum', () => {
-  it('accepts 3.11 and newer', () => {
+  it('accepts 3.11 and newer including future releases', () => {
     assert.equal(versionMeetsMinimum([3, 11, 0], MIN_PYTHON_VERSION), true);
     assert.equal(versionMeetsMinimum([3, 12, 1], MIN_PYTHON_VERSION), true);
+    assert.equal(versionMeetsMinimum([3, 14, 0], MIN_PYTHON_VERSION), true);
+    assert.equal(versionMeetsMinimum([3, 99, 0], MIN_PYTHON_VERSION), true);
   });
 
   it('rejects older interpreters', () => {
@@ -62,11 +63,24 @@ describe('buildPythonEnv', () => {
   });
 });
 
-describe('describeProbeFailure', () => {
-  it('distinguishes missing commands from too-old interpreters', () => {
-    assert.equal(describeProbeFailure({ status: 'missing' }), 'missing');
-    assert.equal(describeProbeFailure({ status: 'too_old', version: '3.10.0' }), 'too_old');
-    assert.equal(describeProbeFailure({ status: 'ok' }), 'ok');
+describe('parseVersionTuple streams', () => {
+  it('reads version text from stderr when stdout is empty', () => {
+    assert.deepEqual(parseVersionTuple('', 'Python 3.14.0'), [3, 14, 0]);
+  });
+});
+
+describe('interpreterCandidatesForPlatform', () => {
+  it('prefers py -3 on Windows without a fixed 3.13 ceiling', () => {
+    const candidates = interpreterCandidatesForPlatform('win32');
+    assert.equal(candidates[0].executable, 'py');
+    assert.deepEqual(candidates[0].args, ['-3']);
+    assert.ok(!candidates.some((entry) => entry.args[0] === '-3.13'));
+  });
+
+  it('uses generic python3/python commands on Unix', () => {
+    const candidates = interpreterCandidatesForPlatform('linux');
+    assert.deepEqual(candidates[0], { executable: 'python3', args: [] });
+    assert.deepEqual(candidates[1], { executable: 'python', args: [] });
   });
 });
 
@@ -140,8 +154,8 @@ describe('createPythonRuntime', () => {
       env: {},
       execFile: (file, args, _opts, cb) => {
         calls.push({ file, args });
-        if (file === 'py' && args[0] === '-3.11') {
-          cb(null, 'Python 3.11.9\n', '');
+        if (file === 'py' && args[0] === '-3') {
+          cb(null, '', 'Python 3.14.2\n');
           return;
         }
         const error = new Error('spawn ENOENT');
@@ -152,7 +166,8 @@ describe('createPythonRuntime', () => {
 
     const result = await runtime.resolveInterpreter();
     assert.equal(result.executable, 'py');
-    assert.deepEqual(result.args, ['-3.11']);
+    assert.deepEqual(result.args, ['-3']);
+    assert.deepEqual(result.version, [3, 14, 2]);
     assert.ok(calls.length >= 1);
   });
 

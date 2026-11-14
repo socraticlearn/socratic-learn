@@ -35,8 +35,8 @@ describe('createLauncher', () => {
       },
     });
 
-    const exitCode = await launcher.run(['--version', 'learn', 'math']);
-    assert.equal(exitCode, 0);
+    const outcome = await launcher.run(['--version', 'learn', 'math']);
+    assert.deepEqual(outcome, { status: 'exited', code: 0 });
     const codeIndex = spawnArgs.indexOf('-c');
     assert.ok(codeIndex >= 0);
     assert.match(spawnArgs[codeIndex + 1], /entry_point\(\)/);
@@ -89,8 +89,8 @@ describe('createLauncher', () => {
       },
     });
 
-    const code = await launcher.run(['doctor']);
-    assert.equal(code, 17);
+    const outcome = await launcher.run(['doctor']);
+    assert.deepEqual(outcome, { status: 'exited', code: 17 });
   });
 
   it('forwards termination signals without masking them', async () => {
@@ -110,8 +110,8 @@ describe('createLauncher', () => {
       forwardSignal: (signal) => forwarded.push(signal),
     });
 
-    const code = await launcher.run([]);
-    assert.equal(code, null);
+    const outcome = await launcher.run([]);
+    assert.deepEqual(outcome, { status: 'signaled', signal: 'SIGTERM' });
     assert.deepEqual(forwarded, ['SIGTERM']);
   });
 
@@ -127,8 +127,8 @@ describe('createLauncher', () => {
       writeStderr: (chunk) => writes.push(chunk),
     });
 
-    const code = await launcher.run(['--version']);
-    assert.notEqual(code, 0);
+    const outcome = await launcher.run(['--version']);
+    assert.deepEqual(outcome, { status: 'exited', code: 1 });
     assert.match(writes.join(''), /Python 3\.11\+/);
   });
 });
