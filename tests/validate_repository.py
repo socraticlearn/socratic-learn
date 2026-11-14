@@ -1164,6 +1164,30 @@ def workflow_step(job: str, name: str) -> str:
     )
 
 
+def workflow_job_needs(job: str) -> list[str]:
+    if not job:
+        return []
+    needs: list[str] = []
+    collecting = False
+    for line in job.splitlines()[1:]:
+        if re.match(r"^  [a-z0-9-]+:\s*$", line):
+            break
+        scalar = re.match(r"^\s+needs:\s+(\S+)\s*$", line)
+        if scalar:
+            return [scalar.group(1).strip()]
+        if re.match(r"^\s+needs:\s*$", line):
+            collecting = True
+            continue
+        if collecting:
+            item = re.match(r"^\s+-\s+(\S+)\s*$", line)
+            if item:
+                needs.append(item.group(1).strip())
+                continue
+            if line.strip():
+                collecting = False
+    return needs
+
+
 def workflow_action_step(job: str, action: str) -> str:
     line = f"      - uses: {action}"
     return next(
@@ -1471,9 +1495,141 @@ def validate_release_automation(root: Path) -> list[str]:
             or "pypa/gh-action-pypi-publish@release/v1" not in pypi_publish
         ):
             errors.append("PyPI publishing must use tag-only trusted publishing")
-        if "needs: python-package" not in pypi_publish:
+        npm_package = workflow_job(release, "npm-package")
+        publish_npm = workflow_job(release, "publish-npm")
+        if not npm_package:
+            errors.append("Release workflow must include an npm-package job")
+        else:
+            npm_needs = workflow_job_needs(npm_package)
+            if "python-package" not in npm_needs and "needs: python-package" not in npm_package:
+                errors.append(
+                    "npm-package job must depend on the verified python-package job"
+                )
+            if not any(
+                marker in npm_package
+                for marker in ('node-version: "24"', "node-version: 24")
+            ):
+                errors.append(
+                    "npm-package job is missing required Node build or smoke steps"
+                )
+            if "cache: false" not in npm_package:
+                errors.append(
+                    "npm-package job is missing required Node build or smoke steps"
+                )
+            for term in (
+                "npm@>=11.5.1",
+                "tools/build_npm_package.py",
+                "npm test --prefix packages/npm-cli",
+                "npx --yes --package",
+                "@socraticlearn/cli",
+            ):
+                if term not in npm_package:
+                    errors.append(
+                        "npm-package job is missing required Node build or smoke steps"
+                    )
+                    break
+            if "python -m build" in npm_package:
+                errors.append(
+                    "npm-package job must not rebuild Python distributions"
+                )
+            npm_upload = workflow_action_step(
+                npm_package,
+                "actions/upload-artifact@v4",
+            )
+            if (
+                workflow_action_input(npm_upload, "name") != "npm-package"
+                or workflow_action_input(npm_upload, "if-no-files-found") != "error"
+            ):
+                errors.append(
+                    "npm-package artifact upload must be strict and named npm-package"
+                )
+            python_download = workflow_action_step(
+                npm_package,
+                "actions/download-artifact@v4",
+            )
+            if workflow_action_input(python_download, "name") != "python-package":
+                errors.append(
+                    "npm-package job must download the python-package artifact"
+                )
+
+        github_needs = workflow_job_needs(github_publish)
+        if "python-package" not in github_needs or "npm-package" not in github_needs:
             errors.append(
-                "PyPI publishing must wait for the Python package job"
+                "publish-github must depend on python-package and npm-package"
+            )
+        github_downloads = [
+            workflow_action_input(step, "name")
+            for step in workflow_steps(github_publish)
+            if step.splitlines()[0].endswith("actions/download-artifact@v4")
+        ]
+        if set(github_downloads) != {"python-package", "npm-package"}:
+            errors.append(
+                "publish-github must download python-package and npm-package "
+                "artifacts without rebuilding"
+            )
+        if any(
+            marker in github_publish
+            for marker in ("python -m build", "tools/build_npm_package.py")
+        ):
+            errors.append(
+                "publish-github must attach verified artifacts without rebuilding"
+            )
+
+        if publish_npm:
+            if "environment: npm" not in publish_npm:
+                errors.append("npm publishing must use protected environment npm")
+            if "id-token: write" not in publish_npm:
+                errors.append("npm publishing must grant id-token: write")
+            npm_needs = workflow_job_needs(publish_npm)
+            if "publish-github" not in npm_needs and "needs: publish-github" not in publish_npm:
+                errors.append(
+                    "npm publishing must wait for publish-github"
+                )
+            if "registry-url: https://registry.npmjs.org" not in publish_npm:
+                errors.append(
+                    "npm publishing must target https://registry.npmjs.org"
+                )
+            if "npm publish" not in publish_npm or "--access public" not in publish_npm:
+                errors.append(
+                    "npm publishing must publish @socraticlearn/cli publicly"
+                )
+            if workflow_action_input(
+                workflow_action_step(publish_npm, "actions/download-artifact@v4"),
+                "name",
+            ) != "npm-package":
+                errors.append(
+                    "npm publishing must consume the npm-package artifact only"
+                )
+            if "tools/build_npm_package.py" in publish_npm or "python -m build" in publish_npm:
+                errors.append(
+                    "npm publishing must consume the npm-package artifact only"
+                )
+            if not any(
+                marker in publish_npm
+                for marker in ('node-version: "24"', "node-version: 24")
+            ):
+                errors.append(
+                    "npm publishing must use Node 24 with caching disabled"
+                )
+            if "cache: false" not in publish_npm:
+                errors.append(
+                    "npm publishing must use Node 24 with caching disabled"
+                )
+            if "npm@>=11.5.1" not in publish_npm:
+                errors.append(
+                    "npm publishing must meet npm trusted publishing version floor"
+                )
+        else:
+            errors.append("Release workflow must include a publish-npm job")
+
+        pypi_needs = workflow_job_needs(pypi_publish)
+        if "publish-github" not in pypi_needs and "needs: publish-github" not in pypi_publish:
+            errors.append(
+                "Registry publishing must wait for publish-github"
+            )
+        if "python-package" in pypi_needs:
+            errors.append(
+                "PyPI publishing must not bypass the GitHub release gate"
             )
         if any(
             marker in release_lower
@@ -1483,10 +1639,12 @@ def validate_release_automation(root: Path) -> list[str]:
                 "twine_password",
                 "api-token:",
                 "password:",
+                "node_auth_token",
+                "npm_token",
             )
         ):
             errors.append(
-                "PyPI publishing must not use skip-existing or registry tokens"
+                "Release publishing must not use skip-existing or registry tokens"
             )
 
         python_package = workflow_job(release, "python-package")
@@ -1545,14 +1703,13 @@ def validate_release_automation(root: Path) -> list[str]:
             errors.append(
                 "Release artifact upload must fail when files are missing"
             )
-        shared_artifact = all(
-            "needs: python-package" in job
-            and workflow_action_input(
-                workflow_action_step(job, "actions/download-artifact@v4"),
-                "name",
-            )
-            == "python-package"
-            for job in (github_publish, pypi_publish)
+        pypi_download = workflow_action_step(
+            pypi_publish,
+            "actions/download-artifact@v4",
+        )
+        shared_artifact = (
+            workflow_action_input(pypi_download, "name") == "python-package"
+            and "python-package" in github_downloads
         )
         if (
             workflow_action_input(upload, "name") != "python-package"

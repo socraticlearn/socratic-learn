@@ -2060,9 +2060,11 @@ class RepositoryValidationTests(unittest.TestCase):
             "if: github.event_name == 'push' && "
             "startsWith(github.ref, 'refs/tags/v')"
         )
-        self.assertEqual(2, release.count(publish_gate))
-        pypi = release.split("  publish-pypi:", 1)[1]
-        self.assertIn("needs: python-package", pypi)
+        self.assertEqual(3, release.count(publish_gate))
+        pypi = release.split("  publish-pypi:", 1)[1].split(
+            "  publish-npm:", 1
+        )[0]
+        self.assertIn("needs: publish-github", pypi)
         self.assertIn("permissions:\n  contents: read", release)
         self.assertEqual(1, release.count("contents: write"))
         self.assertIn("github.ref_name", release)
@@ -2122,13 +2124,19 @@ class RepositoryValidationTests(unittest.TestCase):
             "  publish-pypi:",
             1,
         )[0]
-        pypi = release.split("  publish-pypi:", 1)[1]
+        pypi = release.split("  publish-pypi:", 1)[1].split(
+            "  publish-npm:", 1
+        )[0]
 
         self.assertIn("if-no-files-found: error", release)
-        for job in (github, pypi):
-            self.assertIn("needs: python-package", job)
-            self.assertIn("actions/download-artifact@v4", job)
-            self.assertIn("name: python-package", job)
+        self.assertIn("python-package", github)
+        self.assertIn("npm-package", github)
+        self.assertIn("actions/download-artifact@v4", github)
+        self.assertIn("name: python-package", github)
+        self.assertIn("name: npm-package", github)
+        self.assertIn("needs: publish-github", pypi)
+        self.assertIn("actions/download-artifact@v4", pypi)
+        self.assertIn("name: python-package", pypi)
 
     def test_validator_rejects_inexact_artifact_build_and_validation(self) -> None:
         temp, root = self.make_root()
@@ -2222,7 +2230,7 @@ class RepositoryValidationTests(unittest.TestCase):
         )
 
         self.assertIn(
-            "PyPI publishing must not use skip-existing or registry tokens",
+            "Release publishing must not use skip-existing or registry tokens",
             validate(root),
         )
 
@@ -2850,7 +2858,7 @@ class RepositoryValidationTests(unittest.TestCase):
         )
         before_pypi, pypi = text.split("  publish-pypi:", 1)
         pypi = pypi.replace(
-            "needs: python-package",
+            "needs: publish-github",
             "needs: verify-version",
             1,
         )
@@ -2864,7 +2872,7 @@ class RepositoryValidationTests(unittest.TestCase):
             errors,
         )
         self.assertIn(
-            "PyPI publishing must wait for the Python package job",
+            "Registry publishing must wait for publish-github",
             errors,
         )
 
@@ -3733,6 +3741,162 @@ class PortableSessionMemoryDocumentationTests(unittest.TestCase):
         )
         self.assertIn(
             "README.md is missing portable session memory guidance",
+            validate(root),
+        )
+
+
+class SynchronizedRegistryReleaseTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.root = Path(__file__).resolve().parents[1]
+        cls.release = (cls.root / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+
+    def test_release_jobs_follow_synchronized_dependency_graph(self) -> None:
+        release = self.release
+        for job in (
+            "verify-version:",
+            "python-package:",
+            "npm-package:",
+            "publish-github:",
+            "publish-pypi:",
+            "publish-npm:",
+        ):
+            with self.subTest(job=job):
+                self.assertIn(f"  {job}", release)
+        self.assertIn("needs: verify-version", release.split("python-package:", 1)[1])
+        npm = release.split("  npm-package:", 1)[1].split("  publish-github:", 1)[0]
+        self.assertIn("python-package", npm)
+        github = release.split("  publish-github:", 1)[1].split(
+            "  publish-pypi:", 1
+        )[0]
+        self.assertIn("python-package", github)
+        self.assertIn("npm-package", github)
+        pypi = release.split("  publish-pypi:", 1)[1].split("  publish-npm:", 1)[0]
+        npm_publish = release.split("  publish-npm:", 1)[1]
+        self.assertIn("needs: publish-github", pypi)
+        self.assertIn("needs: publish-github", npm_publish)
+        self.assertNotIn("needs: python-package", pypi)
+        self.assertNotIn("needs: npm-package", pypi)
+
+    def test_npm_package_job_builds_from_downloaded_python_artifact(self) -> None:
+        npm = self.release.split("  npm-package:", 1)[1].split(
+            "  publish-github:", 1
+        )[0]
+        for value in (
+            "ubuntu-latest",
+            'node-version: "24"',
+            "cache: false",
+            "npm@>=11.5.1",
+            "name: python-package",
+            "tools/build_npm_package.py",
+            "npm test --prefix packages/npm-cli",
+            "npx --yes --package",
+            "socratic --version",
+            "name: npm-package",
+            "if-no-files-found: error",
+            "@socraticlearn/cli",
+        ):
+            with self.subTest(value=value):
+                self.assertIn(value, npm)
+        self.assertNotIn("python -m build", npm)
+
+    def test_publish_github_attaches_python_and_npm_artifacts(self) -> None:
+        github = self.release.split("  publish-github:", 1)[1].split(
+            "  publish-pypi:", 1
+        )[0]
+        self.assertIn("name: python-package", github)
+        self.assertIn("name: npm-package", github)
+        self.assertIn("gh release create", github)
+        self.assertNotIn("tools/build_npm_package.py", github)
+        self.assertNotIn("python -m build", github)
+
+    def test_registry_publish_jobs_use_trusted_publishing(self) -> None:
+        release = self.release
+        publish_gate = (
+            "if: github.event_name == 'push' && "
+            "startsWith(github.ref, 'refs/tags/v')"
+        )
+        self.assertEqual(3, release.count(publish_gate))
+        pypi = release.split("  publish-pypi:", 1)[1].split("  publish-npm:", 1)[0]
+        npm = release.split("  publish-npm:", 1)[1]
+        for job in (pypi, npm):
+            self.assertIn(publish_gate, job)
+        self.assertIn("environment: pypi", pypi)
+        self.assertIn("id-token: write", pypi)
+        self.assertIn("pypa/gh-action-pypi-publish@release/v1", pypi)
+        self.assertIn("name: python-package", pypi)
+        self.assertNotIn("tools/build_npm_package.py", pypi)
+        self.assertIn("environment: npm", npm)
+        self.assertIn("id-token: write", npm)
+        self.assertIn('registry-url: https://registry.npmjs.org', npm)
+        self.assertIn('node-version: "24"', npm)
+        self.assertIn("cache: false", npm)
+        self.assertIn("npm publish", npm)
+        self.assertIn("--access public", npm)
+        self.assertIn("name: npm-package", npm)
+        self.assertNotIn("tools/build_npm_package.py", npm)
+        self.assertNotIn("python -m build", npm)
+        lowered = release.lower()
+        for forbidden in (
+            "skip-existing",
+            "node_auth_token",
+            "npm_token",
+            "pypi_api_token",
+            "twine_password",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, lowered)
+
+    def test_validator_rejects_missing_npm_release_job(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        release = root / ".github/workflows/release.yml"
+        release.write_text(
+            release.read_text(encoding="utf-8").replace(
+                "  npm-package:\n",
+                "",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        self.assertIn(
+            "Release workflow must include an npm-package job",
+            validate(root),
+        )
+
+    def test_validator_rejects_pypi_publishing_before_github_release(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        release = root / ".github/workflows/release.yml"
+        release.write_text(
+            release.read_text(encoding="utf-8").replace(
+                "needs: publish-github",
+                "needs: python-package",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        self.assertIn(
+            "Registry publishing must wait for publish-github",
+            validate(root),
+        )
+
+    def test_validator_rejects_npm_rebuild_in_publish_job(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        release = root / ".github/workflows/release.yml"
+        npm, _ = release.read_text(encoding="utf-8").split("  publish-npm:", 1)
+        release.write_text(
+            npm
+            + "  publish-npm:\n"
+            + "    steps:\n"
+            + "      - run: python tools/build_npm_package.py wheel.whl\n",
+            encoding="utf-8",
+        )
+        self.assertIn(
+            "npm publishing must consume the npm-package artifact only",
             validate(root),
         )
 
