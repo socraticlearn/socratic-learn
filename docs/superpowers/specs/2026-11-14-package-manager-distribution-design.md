@@ -119,11 +119,21 @@ Release publication is ordered:
 2. Update repository links, local remotes, and release credentials for the new
    owner.
 3. Verify tests, repository validation, version, and clean generated output.
-4. Build release artifacts and run clean-platform smoke checks.
-5. Publish to PyPI and npm from the same tagged commit.
-6. Confirm each registry entry resolves for the published version.
-7. Update public availability claims only after registries resolve and smoke
-   checks pass on clean platforms.
+4. Build release artifacts for the tagged version (wheel, source distribution,
+   and npm package contents).
+5. Run pre-publish artifact smoke checks on clean platforms. Install and exercise
+   the built wheel and npm bundle directly from those artifacts, not from PyPI or
+   npm. Block publication if these checks fail.
+6. Publish the immutable GitHub Release for that version and attach the release
+   artifacts.
+7. Publish to PyPI and npm from the same source commit, using the GitHub Release
+   as the version anchor.
+8. Confirm each registry entry resolves for the published version.
+9. Run post-publish registry smoke checks on clean platforms. Install with
+   `pipx install socratic-learn` and exercise `npx @socraticlearn/cli` as a
+   public user would, then confirm upgrade and removal through the owning manager.
+10. Update public availability claims only after step 8 succeeds and step 9
+    passes.
 
 External publication failures must not modify an already published artifact or
 reuse a version number. They leave the GitHub Release intact, report the failed
@@ -162,7 +172,8 @@ Repository tests will verify package metadata, version consistency, and that
 the npm launcher targets the correct Python entry point. Release CI will
 validate PyPI and npm publication inputs from the same source commit.
 
-Platform smoke checks will, on clean machines:
+Pre-publish artifact smoke checks exercise the built wheel and npm bundle before
+any registry upload. Post-publish registry smoke checks, on clean machines:
 
 1. install with `pipx install socratic-learn` or use `npx @socraticlearn/cli`
    as documented;
@@ -172,7 +183,7 @@ Platform smoke checks will, on clean machines:
 5. retain private learning records after package removal.
 
 Public availability must not be claimed until each registry entry resolves for
-the version and these checks pass.
+the version and post-publish registry smoke checks pass.
 
 ## Sources
 
