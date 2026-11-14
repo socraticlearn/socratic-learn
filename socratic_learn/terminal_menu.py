@@ -176,6 +176,14 @@ def _default_is_interactive(output: TextIO, input_stream: TextIO) -> bool:
     return output.isatty() and input_stream.isatty()
 
 
+def _terminal_supports_interactive() -> bool:
+    term = os.environ.get("TERM", "").strip().lower()
+    if term in {"dumb", "unknown"}:
+        return False
+    size = shutil.get_terminal_size(fallback=(80, 24))
+    return size.columns > 1 and size.lines > 1
+
+
 def _format_numbered_list(choices: Sequence[MenuChoice]) -> str:
     lines: list[str] = []
     for index, choice in enumerate(choices, start=1):
@@ -278,15 +286,29 @@ def _interactive_lines(
     *,
     selected_index: int,
     columns: int,
+    rows: int,
 ) -> tuple[str, ...]:
-    rows = tuple(
-        _truncate_display_width(
-            format_menu_row(choice, selected=index == selected_index),
-            columns,
-        )
-        for index, choice in enumerate(choices)
+    viewport_height = max(1, rows - 1)
+    visible_count = min(len(choices), viewport_height)
+    start = min(
+        max(0, selected_index - visible_count + 1),
+        max(0, len(choices) - visible_count),
     )
-    return rows + (_truncate_display_width(_INTERACTIVE_HINT, columns),)
+    visible = choices[start : start + visible_count]
+    safe_columns = max(1, columns - 1)
+    rendered_rows = tuple(
+        _truncate_display_width(
+            format_menu_row(
+                choice,
+                selected=(start + index) == selected_index,
+            ),
+            safe_columns,
+        )
+        for index, choice in enumerate(visible)
+    )
+    return rendered_rows + (
+        _truncate_display_width(_INTERACTIVE_HINT, safe_columns),
+    )
 
 
 def _draw_interactive_menu(
@@ -311,8 +333,15 @@ def _choose_interactive(
     read_key: Callable[[], KeyEvent],
 ) -> str:
     index = 0
-    columns = max(1, shutil.get_terminal_size(fallback=(80, 24)).columns)
-    lines = _interactive_lines(choices, selected_index=index, columns=columns)
+    size = shutil.get_terminal_size(fallback=(80, 24))
+    columns = max(2, size.columns)
+    rows = max(2, size.lines)
+    lines = _interactive_lines(
+        choices,
+        selected_index=index,
+        columns=columns,
+        rows=rows,
+    )
     _draw_interactive_menu(output, lines, redraw=False)
     while True:
         event = read_key()
@@ -332,7 +361,12 @@ def _choose_interactive(
             raise KeyboardInterrupt
         elif event is KeyEvent.EOF:
             _terminate_on_eof(output)
-        lines = _interactive_lines(choices, selected_index=index, columns=columns)
+        lines = _interactive_lines(
+            choices,
+            selected_index=index,
+            columns=columns,
+            rows=rows,
+        )
         _draw_interactive_menu(output, lines, redraw=True)
 
 
@@ -418,13 +452,13 @@ def read_interactive_key() -> KeyEvent:
     fd = sys.stdin.fileno()
     previous = termios.tcgetattr(fd)
     try:
-        tty.setraw(fd)
+        tty.setcbreak(fd, termios.TCSANOW)
         return _read_posix_menu_key(fd)
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, previous)
 
 
-def _enter_posix_raw_mode(
+def _enter_posix_menu_mode(
     input_stream: TextIO,
 ) -> tuple[
     int,
@@ -438,13 +472,13 @@ def _enter_posix_raw_mode(
     fd = input_stream.fileno()
     previous = termios.tcgetattr(fd)
 
-    def setraw(descriptor: int) -> None:
-        tty.setraw(descriptor, termios.TCSANOW)
+    def setcbreak(descriptor: int) -> None:
+        tty.setcbreak(descriptor, termios.TCSANOW)
 
     def restore(descriptor: int, state: object) -> None:
         termios.tcsetattr(descriptor, termios.TCSADRAIN, state)
 
-    return fd, previous, setraw, restore
+    return fd, previous, setcbreak, restore
 
 
 def choose_menu_item(
@@ -460,11 +494,12 @@ def choose_menu_item(
     _validate_choices(choices)
     resolved_output = sys.stdout if output is None else output
     resolved_input = sys.stdin if input_stream is None else input_stream
-    interactive = (
+    interactive_requested = (
         _default_is_interactive(resolved_output, resolved_input)
         if is_interactive is None
         else is_interactive()
     )
+    interactive = interactive_requested and _terminal_supports_interactive()
     if interactive:
         if read_key is not None or os.name == "nt":
             reader = read_key or read_interactive_key
@@ -473,8 +508,8 @@ def choose_menu_item(
                 output=resolved_output,
                 read_key=reader,
             )
-        fd, previous, setraw, restore = _enter_posix_raw_mode(resolved_input)
-        setraw(fd)
+        fd, previous, setcbreak, restore = _enter_posix_menu_mode(resolved_input)
+        setcbreak(fd)
         try:
             return _choose_interactive(
                 choices,

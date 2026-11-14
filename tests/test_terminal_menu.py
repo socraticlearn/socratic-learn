@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import io
+import os
 import re
 import sys
+import types
 import unittest
 from collections.abc import Iterator
 from contextlib import redirect_stdout
@@ -22,6 +24,11 @@ ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
 class TerminalMenuTests(unittest.TestCase):
+    def setUp(self) -> None:
+        term = unittest.mock.patch.dict(os.environ, {"TERM": "xterm-256color"})
+        term.start()
+        self.addCleanup(term.stop)
+
     def test_empty_choices_raise_usage_error(self) -> None:
         with self.assertRaisesRegex(UsageError, "at least one"):
             choose_menu_item(
@@ -197,6 +204,22 @@ class TerminalMenuTests(unittest.TestCase):
         )
         self.assertIsNone(ANSI_ESCAPE.search(output.getvalue()))
 
+    def test_dumb_terminal_uses_numbered_fallback(self) -> None:
+        class _TTY(io.StringIO):
+            def isatty(self) -> bool:
+                return True
+
+        output = _TTY()
+        with unittest.mock.patch.dict(os.environ, {"TERM": "dumb"}):
+            result = choose_menu_item(
+                (MenuChoice("only", "Only"),),
+                output=output,
+                input_stream=_TTY("1\n"),
+                read_key=lambda: self.fail("interactive reader used"),
+            )
+        self.assertEqual("only", result)
+        self.assertIsNone(ANSI_ESCAPE.search(output.getvalue()))
+
     def test_interactive_enter_returns_stable_value(self) -> None:
         choices = (
             MenuChoice("new", "New session"),
@@ -356,9 +379,44 @@ class TerminalMenuTests(unittest.TestCase):
             choices,
             selected_index=0,
             columns=18,
+            rows=5,
         )
-        self.assertTrue(all(terminal_menu._terminal_display_width(line) <= 18 for line in lines))
+        self.assertTrue(all(terminal_menu._terminal_display_width(line) <= 17 for line in lines))
         self.assertTrue(any(line.endswith("…") for line in lines))
+
+    def test_interactive_viewport_scrolls_and_reserves_hint_row(self) -> None:
+        choices = tuple(
+            MenuChoice(str(index), f"Choice {index}")
+            for index in range(7)
+        )
+        first = terminal_menu._interactive_lines(
+            choices,
+            selected_index=0,
+            columns=40,
+            rows=4,
+        )
+        scrolled = terminal_menu._interactive_lines(
+            choices,
+            selected_index=5,
+            columns=40,
+            rows=4,
+        )
+        self.assertEqual(4, len(first))
+        self.assertEqual(4, len(scrolled))
+        self.assertIn("> Choice 0", first)
+        self.assertNotIn("Choice 5", first)
+        self.assertIn("> Choice 5", scrolled)
+        self.assertNotIn("Choice 0", scrolled)
+        self.assertEqual("↑/↓ move · Enter select", scrolled[-1])
+
+    def test_redraw_emits_only_visible_lines(self) -> None:
+        output = io.StringIO()
+        terminal_menu._draw_interactive_menu(
+            output,
+            (" Choice 3", "> Choice 4", "↑/↓ move · Enter select"),
+            redraw=True,
+        )
+        self.assertEqual(3, output.getvalue().count("\x1b[2K"))
 
     def test_omits_detail_when_absent(self) -> None:
         choices = (MenuChoice("x", "Plain label"),)
@@ -505,15 +563,16 @@ class NativeKeyParsingTests(unittest.TestCase):
         blocking.assert_called_once()
         timed.assert_called_once()
 
-    def test_posix_raw_mode_spans_menu_and_restores_after_selection(self) -> None:
+    def test_posix_cbreak_mode_spans_menu_and_restores_after_selection(self) -> None:
         choices = (
             MenuChoice("a", "Alpha"),
             MenuChoice("b", "Beta"),
         )
         events = iter([KeyEvent.DOWN, KeyEvent.ENTER])
-        setraw = Mock()
+        setcbreak = Mock()
         restore = Mock()
         with (
+            unittest.mock.patch.dict(os.environ, {"TERM": "xterm-256color"}),
             unittest.mock.patch.object(terminal_menu.os, "name", "posix"),
             unittest.mock.patch.object(
                 terminal_menu,
@@ -522,8 +581,8 @@ class NativeKeyParsingTests(unittest.TestCase):
             ),
             unittest.mock.patch.object(
                 terminal_menu,
-                "_enter_posix_raw_mode",
-                return_value=(9, ("saved",), setraw, restore),
+                "_enter_posix_menu_mode",
+                return_value=(9, ("saved",), setcbreak, restore),
             ),
         ):
             result = choose_menu_item(
@@ -533,8 +592,38 @@ class NativeKeyParsingTests(unittest.TestCase):
                 is_interactive=lambda: True,
             )
         self.assertEqual("b", result)
-        setraw.assert_called_once_with(9)
+        setcbreak.assert_called_once_with(9)
         restore.assert_called_once_with(9, ("saved",))
+
+    def test_posix_menu_mode_uses_cbreak_without_disabling_output_processing(self) -> None:
+        termios = types.SimpleNamespace(
+            TCSANOW=1,
+            TCSADRAIN=2,
+            tcgetattr=Mock(return_value=("saved",)),
+            tcsetattr=Mock(),
+        )
+        tty = types.SimpleNamespace(
+            setcbreak=Mock(),
+            setraw=Mock(side_effect=AssertionError("raw mode used")),
+        )
+        stream = Mock(fileno=Mock(return_value=7))
+        with unittest.mock.patch.dict(
+            sys.modules,
+            {"termios": termios, "tty": tty},
+        ):
+            fd, previous, enter, restore = terminal_menu._enter_posix_menu_mode(
+                stream
+            )
+            enter(fd)
+            restore(fd, previous)
+
+        tty.setcbreak.assert_called_once_with(7, termios.TCSANOW)
+        tty.setraw.assert_not_called()
+        termios.tcsetattr.assert_called_once_with(
+            7,
+            termios.TCSADRAIN,
+            ("saved",),
+        )
 
 
 if __name__ == "__main__":
