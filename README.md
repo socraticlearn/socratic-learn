@@ -118,8 +118,8 @@ five most recent saved entries, and **View all** when you have more saved
 progress. The list can mix learning threads and legacy session records; choosing
 a legacy record imports it into thread storage without removing the original
 file. On a capable terminal, move with the arrow keys and press Enter; otherwise
-pick from the numbered list. Supply a goal on the command line, or run
-`socratic read` with a source, to skip the menu entirely.
+pick from the numbered list. Supply a goal on the command line to skip the menu,
+or run `socratic read` with a source to skip the menu entirely.
 
 You can resume on Pi, Claude Code, or Antigravity from structured summaries and
 checkpoints in your private workspace. Host chat logs are not used as session memory.

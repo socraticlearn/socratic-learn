@@ -317,13 +317,21 @@ README_PORTABLE_SESSION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         ),
     ),
     ("view all", re.compile(r"view all", re.IGNORECASE)),
+    ("arrow navigation", re.compile(r"arrow keys", re.IGNORECASE)),
+    ("numbered fallback", re.compile(r"numbered list", re.IGNORECASE)),
     (
-        "menu navigation",
-        re.compile(r"(arrow keys|numbered list)", re.IGNORECASE),
+        "explicit goal bypass",
+        re.compile(
+            r"supply a goal on the command line to skip the menu",
+            re.IGNORECASE,
+        ),
     ),
     (
         "socratic read bypass",
-        re.compile(r"socratic read.{0,100}(skip|bypass|chooser)", re.IGNORECASE),
+        re.compile(
+            r"socratic read.{0,100}skip the menu",
+            re.IGNORECASE | re.DOTALL,
+        ),
     ),
     (
         "transient session control",
@@ -334,16 +342,30 @@ README_PORTABLE_SESSION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         ),
     ),
     (
-        "thread metadata and checkpoints persist",
+        "thread metadata persistence",
         re.compile(
-            r"(thread metadata|checkpoint).{0,120}persist",
+            r"thread metadata.{0,80}persist",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ),
+    (
+        "checkpoint persistence",
+        re.compile(
+            r"(structured )?checkpoint.{0,80}persist",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ),
+    (
+        "immutable encounters",
+        re.compile(
+            r"(encounters|prior encounters).{0,60}immutable",
             re.IGNORECASE | re.DOTALL,
         ),
     ),
     (
         "workspace not only thread files",
         re.compile(
-            r"(other private learner|along with other|also in the workspace)",
+            r"(other private learner|along with other|already in the workspace)",
             re.IGNORECASE,
         ),
     ),
@@ -352,7 +374,27 @@ README_PORTABLE_SESSION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(r"host chat logs are not used", re.IGNORECASE),
     ),
     ("incomplete thread", re.compile(r"\bincomplete\b", re.IGNORECASE)),
-    ("provider ids privacy", re.compile(r"provider ids", re.IGNORECASE)),
+    (
+        "raw transcript exclusion",
+        re.compile(
+            r"does not keep raw host transcripts",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "credential exclusion",
+        re.compile(
+            r"does not keep.{0,80}provider credentials",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ),
+    (
+        "provider id exclusion",
+        re.compile(
+            r"does not keep.{0,80}provider ids",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ),
 )
 LAUNCHER_SESSION_CONTROL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("checkpoint path", re.compile(r"`checkpoint_path`", re.IGNORECASE)),

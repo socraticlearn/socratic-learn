@@ -3622,6 +3622,149 @@ class PortableSessionMemoryDocumentationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             mutate_once("alpha alpha", "alpha", "beta")
 
+    def _mutate_readme_quick_start(
+        self,
+        root: Path,
+        *,
+        old: str,
+        new: str,
+    ) -> None:
+        readme = root / "README.md"
+        text = readme.read_text(encoding="utf-8")
+        mutated = mutate_once(text, old, new)
+        self.assertNotEqual(text, mutated)
+        readme.write_text(mutated, encoding="utf-8")
+
+    def test_validator_rejects_missing_arrow_navigation(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        self._mutate_readme_quick_start(
+            root,
+            old="move with the arrow keys and press Enter",
+            new="choose a menu row by typing its number",
+        )
+        self.assertIn(
+            "README.md is missing portable session memory guidance",
+            validate(root),
+        )
+
+    def test_validator_rejects_missing_numbered_fallback(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        self._mutate_readme_quick_start(
+            root,
+            old="pick from the numbered list.",
+            new="the menu cannot be used without a pointer device.",
+        )
+        self.assertIn(
+            "README.md is missing portable session memory guidance",
+            validate(root),
+        )
+
+    def test_validator_rejects_missing_explicit_goal_bypass(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        self._mutate_readme_quick_start(
+            root,
+            old="Supply a goal on the command line to skip the menu,",
+            new="Supply a goal on the command line,",
+        )
+        self.assertIn(
+            "README.md is missing portable session memory guidance",
+            validate(root),
+        )
+
+    def test_validator_rejects_missing_socratic_read_bypass(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        self._mutate_readme_quick_start(
+            root,
+            old="or run `socratic read` with a source to skip the menu entirely.",
+            new="or run `socratic read` with a source.",
+        )
+        self.assertIn(
+            "README.md is missing portable session memory guidance",
+            validate(root),
+        )
+
+    def test_validator_rejects_missing_thread_metadata_persistence(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        self._mutate_readme_quick_start(
+            root,
+            old="Thread metadata and structured checkpoint files do persist,",
+            new="Structured checkpoint files do persist,",
+        )
+        self.assertIn(
+            "README.md is missing portable session memory guidance",
+            validate(root),
+        )
+
+    def test_validator_rejects_missing_checkpoint_persistence(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        self._mutate_readme_quick_start(
+            root,
+            old="Thread metadata and structured checkpoint files do persist,",
+            new="Thread metadata does persist,",
+        )
+        self.assertIn(
+            "README.md is missing portable session memory guidance",
+            validate(root),
+        )
+
+    def test_validator_rejects_missing_immutable_encounters(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        self._mutate_readme_quick_start(
+            root,
+            old="Completed encounters in a thread stay immutable once written.",
+            new="Completed encounters in a thread stay editable once written.",
+        )
+        self.assertIn(
+            "README.md is missing portable session memory guidance",
+            validate(root),
+        )
+
+    def test_validator_rejects_raw_transcript_storage_claim(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        self._mutate_readme_quick_start(
+            root,
+            old="does not keep raw host transcripts",
+            new="keeps raw host transcripts",
+        )
+        self.assertIn(
+            "README.md is missing portable session memory guidance",
+            validate(root),
+        )
+
+    def test_validator_rejects_provider_credential_storage_claim(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        self._mutate_readme_quick_start(
+            root,
+            old="does not keep raw host transcripts, provider credentials, or provider ids.",
+            new="keeps raw host transcripts, provider credentials, and provider ids.",
+        )
+        self.assertIn(
+            "README.md is missing portable session memory guidance",
+            validate(root),
+        )
+
+    def test_validator_rejects_provider_id_storage_claim(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        self._mutate_readme_quick_start(
+            root,
+            old=", or provider ids.",
+            new=".",
+        )
+        self.assertIn(
+            "README.md is missing portable session memory guidance",
+            validate(root),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
