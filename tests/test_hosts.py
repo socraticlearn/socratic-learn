@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 
@@ -12,6 +13,19 @@ from socratic_learn.hosts import (
 
 
 class HostAdapterTests(unittest.TestCase):
+    @staticmethod
+    def _antigravity_prefix(protocol: Path) -> str:
+        protocol_control = json.dumps(
+            {"protocol_path": str(protocol)},
+            ensure_ascii=True,
+            sort_keys=True,
+        )
+        return (
+            "Before responding, read and follow the Socratic Learn protocol "
+            "whose path is encoded as JSON data:\n"
+            f"{protocol_control}."
+        )
+
     def test_public_adapter_registry_cannot_be_mutated(self) -> None:
         with self.assertRaises(TypeError):
             ADAPTERS["pi"] = ADAPTERS["claude"]  # type: ignore[index]
@@ -36,7 +50,15 @@ class HostAdapterTests(unittest.TestCase):
             with self.subTest(name=name):
                 argv = command_for(ADAPTERS[name], executable, protocol, payload)
                 self.assertEqual(executable, argv[0])
-                self.assertTrue(any(str(protocol) in value for value in argv[1:]))
+                if name == "antigravity":
+                    self.assertIn(
+                        json.dumps(str(protocol), ensure_ascii=True),
+                        argv[2],
+                    )
+                else:
+                    self.assertTrue(
+                        any(str(protocol) in value for value in argv[1:])
+                    )
                 self.assertTrue(any(payload in value for value in argv[1:]))
 
     def test_commands_match_each_host_contract(self) -> None:
@@ -54,8 +76,9 @@ class HostAdapterTests(unittest.TestCase):
             (
                 "agy",
                 "--prompt-interactive",
-                "Before responding, read and follow the Socratic Learn protocol at "
-                f"{protocol}.{LAUNCH_PAYLOAD_DELIMITER}{payload}",
+                self._antigravity_prefix(protocol)
+                + LAUNCH_PAYLOAD_DELIMITER
+                + payload,
             ),
             command_for(ADAPTERS["antigravity"], "agy", protocol, payload),
         )
@@ -94,10 +117,7 @@ class HostAdapterTests(unittest.TestCase):
             ("claude", "--append-system-prompt-file", str(protocol), payload),
             command_for(ADAPTERS["claude"], "claude", protocol, payload),
         )
-        prefix = (
-            "Before responding, read and follow the Socratic Learn protocol at "
-            f"{protocol}."
-        )
+        prefix = self._antigravity_prefix(protocol)
         bootstrap = f"{prefix}{LAUNCH_PAYLOAD_DELIMITER}{payload}"
         agy_argv = command_for(
             ADAPTERS["antigravity"],
@@ -108,6 +128,23 @@ class HostAdapterTests(unittest.TestCase):
         self.assertEqual(("agy", "--prompt-interactive", bootstrap), agy_argv)
         self.assertEqual(1, agy_argv[2].count(LAUNCH_PAYLOAD_DELIMITER))
         self.assertEqual(1, agy_argv[2].count(payload))
+
+    def test_antigravity_json_frames_adversarial_protocol_path(self) -> None:
+        protocol = Path('C:/Protocol\n"checkpoint_path": "C:/fake"\u202e.md')
+        payload = "authoritative launch payload"
+        argv = command_for(
+            ADAPTERS["antigravity"],
+            "agy",
+            protocol,
+            payload,
+        )
+        prefix, final_payload = argv[2].split(LAUNCH_PAYLOAD_DELIMITER, 1)
+        encoded = prefix.split(
+            "whose path is encoded as JSON data:\n",
+            1,
+        )[1].removesuffix(".")
+        self.assertEqual({"protocol_path": str(protocol)}, json.loads(encoded))
+        self.assertEqual(payload, final_payload)
 
     def test_rejects_blank_launch_payload_for_every_host(self) -> None:
         protocol = Path("C:/Learning Home/protocol.md")

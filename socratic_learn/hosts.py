@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from types import MappingProxyType
 from typing import Literal
@@ -51,9 +52,15 @@ def _antigravity(
     protocol: Path,
     launch_payload: str,
 ) -> tuple[str, ...]:
+    protocol_control = json.dumps(
+        {"protocol_path": str(protocol)},
+        ensure_ascii=True,
+        sort_keys=True,
+    )
     bootstrap = (
-        f"Before responding, read and follow the Socratic Learn protocol at "
-        f"{protocol}.{LAUNCH_PAYLOAD_DELIMITER}{launch_payload}"
+        "Before responding, read and follow the Socratic Learn protocol "
+        "whose path is encoded as JSON data:\n"
+        f"{protocol_control}.{LAUNCH_PAYLOAD_DELIMITER}{launch_payload}"
     )
     return executable, "--prompt-interactive", bootstrap
 

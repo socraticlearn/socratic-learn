@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
 import shutil
@@ -66,11 +67,17 @@ class _StoredMenuItem:
 _NEW_SESSION = "new-session"
 _VIEW_ALL = "view-all"
 _SOURCE_STUDY_DELIMITER = "\n\n--- SOCRATIC LEARN SOURCE STUDY ---\n"
+_CONTROL_START = "--- SOCRATIC LEARN SESSION CONTROL (JSON) ---\n"
+_CONTROL_END = "\n--- END SOCRATIC LEARN SESSION CONTROL ---"
+_CLEANUP_WARNING = (
+    "warning: session checkpoint cleanup did not complete; "
+    "the primary launcher outcome was preserved.\n"
+)
 
 
 def _safe_menu_text(text: str, *, fallback: str) -> str:
     rendered = "".join(
-        " " if unicodedata.category(character) == "Cc" else character
+        " " if unicodedata.category(character) in {"Cc", "Cf"} else character
         for character in text
     )
     compact = " ".join(rendered.split())
@@ -182,46 +189,94 @@ def _build_launch_payload(
     source_study_payload: str | None,
 ) -> str:
     title = thread.refined_title or thread.provisional_title
+    prior = _encounter_path(records, thread) if is_resume else None
+    resume: dict[str, object] | None = None
     if is_resume:
-        prior = _encounter_path(records, thread)
-        lines = [
-            "Resume this Socratic Learn thread.",
-            f"Selected thread title: {title}",
-        ]
+        latest_incomplete = thread.status == "incomplete"
         if prior is None:
-            lines.extend(
-                [
-                    "No complete checkpoint exists for this thread; prior evidence "
-                    "must be re-established.",
-                    "Saved next step: No next step was saved.",
-                ]
-            )
+            prior_role = "none"
+        elif latest_incomplete:
+            prior_role = "prior_evidence_only"
         else:
-            lines.extend(
-                [
-                    f"Prior complete encounter: {prior}",
-                    f"Saved next step: {thread.next_step or 'No next step was saved.'}",
-                ]
-            )
-    else:
-        lines = [
-            "Start a new Socratic Learn thread.",
-            f"Thread title: {title}",
-            "Learner goal:",
-            thread.original_goal,
-        ]
-    lines.extend(
-        [
-            f"Checkpoint path: {pending.resolve()}",
-            "Before ending, write the shared session record to that exact checkpoint path.",
-            "Title contract: use '# Session: YYYY-MM-DD — <concise descriptive title>' "
-            "and keep the title specific to this learning thread.",
-        ]
+            prior_role = "resume_context"
+        resume = {
+            "latest_launch_incomplete": latest_incomplete,
+            "must_reestablish_current_state": latest_incomplete or prior is None,
+            "prior_complete_encounter_path": (
+                str(prior) if prior is not None else None
+            ),
+            "prior_complete_encounter_role": prior_role,
+            "saved_next_step": thread.next_step or None,
+        }
+    control = {
+        "checkpoint_path": str(pending.resolve()),
+        "mode": "resume" if is_resume else "new",
+        "resume": resume,
+        "schema_version": 1,
+        "session_record_contract": {
+            "heading": "# Session: YYYY-MM-DD — <concise descriptive title>",
+            "instruction": (
+                "Write the shared session record to the path supplied by the "
+                "top-level control field before ending. Keep the title specific "
+                "to this learning thread."
+            ),
+        },
+        "thread": {
+            "goal": thread.original_goal,
+            "status": thread.status,
+            "title": title,
+        },
+    }
+    trailer = (
+        _CONTROL_START
+        + json.dumps(
+            control,
+            ensure_ascii=True,
+            indent=2,
+            sort_keys=True,
+        )
+        + _CONTROL_END
     )
-    payload = "\n".join(lines)
     if source_study_payload is not None:
-        payload += _SOURCE_STUDY_DELIMITER + source_study_payload
-    return payload
+        return (
+            _SOURCE_STUDY_DELIMITER.lstrip("\n")
+            + source_study_payload
+            + "\n\n"
+            + trailer
+        )
+    return trailer
+
+
+def _write_warning(output: TextIO, message: str) -> None:
+    try:
+        output.write(message)
+        output.flush()
+    except BaseException:
+        pass
+
+
+def _add_cleanup_note(primary: BaseException) -> None:
+    try:
+        primary.add_note(
+            "Socratic Learn could not complete checkpoint cleanup; "
+            "the primary outcome was preserved."
+        )
+    except BaseException:
+        pass
+
+
+def _best_effort(
+    operation: Callable[[], None],
+    *,
+    output: TextIO,
+    primary: BaseException | None = None,
+) -> None:
+    try:
+        operation()
+    except BaseException:
+        _write_warning(output, _CLEANUP_WARNING)
+        if primary is not None:
+            _add_cleanup_note(primary)
 
 
 def _finish_encounter(
@@ -241,22 +296,43 @@ def _finish_encounter(
                 raise IntegrityError("pending checkpoint is a symbolic link")
             parse_session_record(pending.read_text(encoding="utf-8"))
         except (IntegrityError, OSError, UnicodeError):
-            output.write(
+            _write_warning(
+                output,
                 "warning: the agent wrote a malformed checkpoint; "
-                "the thread remains incomplete.\n"
+                "the thread remains incomplete.\n",
             )
         else:
-            finalize_thread_encounter(records, thread_id, pending)
-            return
-    mark_thread_incomplete(records, thread_id)
-    if pending.is_file() and not pending.is_symlink():
-        discard_pending_encounter(records, thread_id, pending)
+            try:
+                finalize_thread_encounter(records, thread_id, pending)
+            except BaseException as primary:
+                try:
+                    mark_thread_incomplete(records, thread_id)
+                except BaseException:
+                    _add_cleanup_note(primary)
+                raise
+            else:
+                return
+    _mark_and_discard(records=records, thread_id=thread_id, pending=pending)
+
+
+def _mark_and_discard(*, records: Path, thread_id: str, pending: Path) -> None:
+    first_error: BaseException | None = None
+    try:
+        mark_thread_incomplete(records, thread_id)
+    except BaseException as error:
+        first_error = error
+    try:
+        if pending.is_file() and not pending.is_symlink():
+            discard_pending_encounter(records, thread_id, pending)
+    except BaseException as error:
+        if first_error is None:
+            first_error = error
+    if first_error is not None:
+        raise first_error
 
 
 def _abandon_pending(*, records: Path, thread_id: str, pending: Path) -> None:
-    mark_thread_incomplete(records, thread_id)
-    if pending.is_file() and not pending.is_symlink():
-        discard_pending_encounter(records, thread_id, pending)
+    _mark_and_discard(records=records, thread_id=thread_id, pending=pending)
 
 
 def _safe_windows_host_argv(
@@ -333,6 +409,11 @@ def run_learning(
             "no compatible agent was found",
             remediation="install Pi, Claude Code, or Antigravity and retry",
         )
+    if options.agent is not None and options.agent not in detected:
+        raise UsageError(
+            f"requested agent '{options.agent}' was not detected",
+            remediation="choose an installed compatible agent",
+        )
 
     home = launcher_home(environ)
     workspace = None
@@ -370,15 +451,9 @@ def run_learning(
     config = load_config(config_path)
 
     selected = options.agent
-    if selected is not None:
-        if selected not in detected:
-            raise UsageError(
-                f"requested agent '{selected}' was not detected",
-                remediation="choose an installed compatible agent",
-            )
-    elif config.default_agent in detected:
+    if selected is None and config.default_agent in detected:
         selected = config.default_agent
-    else:
+    elif selected is None:
         if config.default_agent is not None:
             output.write(
                 f"Saved agent '{config.default_agent}' is no longer available.\n"
@@ -419,11 +494,15 @@ def run_learning(
                 index_path=bundle_path / "index.md",
                 metadata_path=bundle_path / "metadata.json",
             )
-        except BaseException:
-            _abandon_pending(
-                records=workspace.records,
-                thread_id=thread.id,
-                pending=pending,
+        except BaseException as primary:
+            _best_effort(
+                lambda: _abandon_pending(
+                    records=workspace.records,
+                    thread_id=thread.id,
+                    pending=pending,
+                ),
+                output=output,
+                primary=primary,
             )
             raise
 
@@ -444,48 +523,67 @@ def run_learning(
             launch_payload,
         )
         argv = _safe_windows_host_argv(host.executable, argv, environ)
-    except BaseException:
-        _abandon_pending(
-            records=workspace.records,
-            thread_id=thread.id,
-            pending=pending,
+    except BaseException as primary:
+        _best_effort(
+            lambda: _abandon_pending(
+                records=workspace.records,
+                thread_id=thread.id,
+                pending=pending,
+            ),
+            output=output,
+            primary=primary,
         )
         raise
 
     try:
         result = run_process(list(argv), cwd=workspace.root, check=False)
     except KeyboardInterrupt:
-        _finish_encounter(
-            records=workspace.records,
-            thread_id=thread.id,
-            pending=pending,
+        _best_effort(
+            lambda: _finish_encounter(
+                records=workspace.records,
+                thread_id=thread.id,
+                pending=pending,
+                output=output,
+            ),
             output=output,
         )
         return 130
     except FileNotFoundError as error:
-        _finish_encounter(
-            records=workspace.records,
-            thread_id=thread.id,
-            pending=pending,
-            output=output,
-        )
-        raise FilesystemError(
+        launcher_error = FilesystemError(
             f"agent '{selected}' executable disappeared before launch",
             path=host.executable,
             remediation="restore the executable or select another agent",
-        ) from error
-    except BaseException:
-        _finish_encounter(
+        )
+        _best_effort(
+            lambda: _finish_encounter(
+                records=workspace.records,
+                thread_id=thread.id,
+                pending=pending,
+                output=output,
+            ),
+            output=output,
+            primary=launcher_error,
+        )
+        raise launcher_error from error
+    except BaseException as primary:
+        _best_effort(
+            lambda: _finish_encounter(
+                records=workspace.records,
+                thread_id=thread.id,
+                pending=pending,
+                output=output,
+            ),
+            output=output,
+            primary=primary,
+        )
+        raise
+    _best_effort(
+        lambda: _finish_encounter(
             records=workspace.records,
             thread_id=thread.id,
             pending=pending,
             output=output,
-        )
-        raise
-    _finish_encounter(
-        records=workspace.records,
-        thread_id=thread.id,
-        pending=pending,
+        ),
         output=output,
     )
     return result.returncode
