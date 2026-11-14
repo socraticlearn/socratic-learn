@@ -39,50 +39,11 @@ built for any subject or skill.
 
 ## Quick start
 
-Normal use requires no repository clone and no source build. The native
-installers target x86-64 Windows, Linux, and macOS.
-
-Native installation is available only after GitHub Release v0.1.0 is published.
-When that release exists, download its exact installer to a temporary file and
-review it before running it.
-
-Windows PowerShell:
-
-```powershell
-$installer = Join-Path $env:TEMP "socratic-install-v0.1.0.ps1"
-Invoke-WebRequest https://github.com/marcos-guilherme/socratic-learn/releases/download/v0.1.0/install.ps1 -OutFile $installer
-Get-Content $installer
-```
-
-After reviewing the file:
-
-```powershell
-& $installer
-```
-
-Linux or macOS:
-
-```sh
-installer=$(mktemp)
-curl -fL https://github.com/marcos-guilherme/socratic-learn/releases/download/v0.1.0/install.sh -o "$installer"
-cat "$installer"
-```
-
-After reviewing the file:
-
-```sh
-sh "$installer"
-rm -f "$installer"
-```
-
-The installers verify downloaded files before installing anything. The first
-native binaries are unsigned and may trigger Windows SmartScreen or macOS
-Gatekeeper. A checksum confirms the downloaded bytes, but it does not replace
-code signing.
-
-For another architecture, or for a Python-managed installation, use pipx after
-package publication. The pipx command is available only after socratic-learn
-0.1.0 is published on PyPI.
+Normal use requires no repository clone and no source build. Install the
+launcher package, then run `socratic`. The pipx route needs [Python
+3.11+](https://www.python.org/downloads/) and [pipx](https://pipx.pypa.io/).
+The documented pipx command becomes available only after socratic-learn is
+published on PyPI.
 
 ```text
 pipx install socratic-learn
@@ -92,6 +53,17 @@ Start without putting your learning goal in shell history:
 
 ```text
 socratic
+```
+
+Both distribution routes run the same Python Socratic Learn implementation.
+Neither bundles an AI provider, model, credential, or host. Pi, Claude Code, or
+Antigravity stays separately installed and authenticated on your machine.
+
+Optional alternative: [Node.js](https://nodejs.org/) plus Python 3.11+ can run
+the npm adapter with `npx`. The npm command becomes available only after @socraticlearn/cli is published.
+
+```text
+npx @socraticlearn/cli
 ```
 
 You can also pass a goal or choose a host directly:
@@ -144,14 +116,24 @@ a project integration rather than a launcher choice.
 Supporting any subject does not mean every host knows every subject. Accuracy
 still depends on the selected model, its sources, and its available tools.
 
+Package lifecycle is owned by your installer. With pipx:
+
 ```text
-socratic update
-socratic uninstall
+pipx upgrade socratic-learn
+pipx uninstall socratic-learn
 ```
 
-Native installations manage these operations directly. A pipx installation
-uses `pipx upgrade socratic-learn` and `pipx uninstall socratic-learn`.
-Uninstall keeps learner records unless you explicitly request their deletion.
+`npx` is an on-demand invocation; it does not replace pipx upgrade or uninstall.
+Package removal preserves learner records under `~/.socratic-learn/learning/`.
+
+Project-adapter `socratic install ...` is different from package installation.
+It copies loaders into a repository you already cloned. See
+[Installation and lifecycle](docs/universal-installation.md).
+
+Source and releases live at
+[https://github.com/socraticlearn/socratic-learn](https://github.com/socraticlearn/socratic-learn).
+This README does not claim that the GitHub organization, PyPI project, npm
+scope, or release tags already exist.
 
 ## Learn from an article
 
@@ -268,7 +250,7 @@ that is already open. Ambiguous paths are preserved for manual recovery.
 Contributors can clone and build the source:
 
 ```powershell
-git clone https://github.com/marcos-guilherme/socratic-learn.git
+git clone https://github.com/socraticlearn/socratic-learn.git
 cd socratic-learn
 python -m socratic_learn build
 ```

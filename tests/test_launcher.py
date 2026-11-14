@@ -204,6 +204,9 @@ class LauncherTests(unittest.TestCase):
 
             self.assertEqual([], prompts)
             self.assertIsNotNone(raised.exception.remediation)
+            remediation = raised.exception.remediation or ""
+            for host in ("Pi", "Claude Code", "Antigravity"):
+                self.assertIn(host, remediation)
 
     def test_empty_prompted_goal_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -171,24 +171,18 @@ README_LAUNCHER_COMMANDS = (
     'socratic "I want to learn linear algebra"',
     "socratic --agent pi",
     "socratic --here",
-    "socratic update",
-    "socratic uninstall",
     "pipx install socratic-learn",
-)
-NATIVE_RELEASE_CAVEAT = (
-    "Native installation is available only after GitHub Release v0.1.0 "
-    "is published."
+    "npx @socraticlearn/cli",
 )
 PYPI_RELEASE_CAVEAT = (
-    "The pipx command is available only after socratic-learn 0.1.0 "
-    "is published on PyPI."
+    "The documented pipx command becomes available only after "
+    "socratic-learn is published on PyPI."
 )
-VERSIONED_INSTALLER_URLS = (
-    "https://github.com/marcos-guilherme/socratic-learn/releases/download/"
-    "v0.1.0/install.ps1",
-    "https://github.com/marcos-guilherme/socratic-learn/releases/download/"
-    "v0.1.0/install.sh",
+NPM_RELEASE_CAVEAT = (
+    "The npm command becomes available only after @socraticlearn/cli is "
+    "published."
 )
+BRANDED_REPOSITORY_URL = "https://github.com/socraticlearn/socratic-learn"
 
 
 def requirement_pattern(requirement: str) -> re.Pattern[str]:
@@ -534,11 +528,14 @@ class RepositoryValidationTests(unittest.TestCase):
             "no repository clone",
             "does not store provider credentials",
             "shell history",
-            "unsigned",
-            "smartscreen",
-            "gatekeeper",
+            "python 3.11",
+            "pipx",
+            "node",
+            "neither bundles",
             "pi, claude code, and antigravity",
             "cursor remains a project integration",
+            "project-adapter",
+            BRANDED_REPOSITORY_URL.lower(),
         ):
             with self.subTest(clause=clause):
                 self.assertIn(clause, normalized)
@@ -570,10 +567,9 @@ class RepositoryValidationTests(unittest.TestCase):
         normalized_quick_start = " ".join(quick_start.split())
 
         ordered_markers = (
-            VERSIONED_INSTALLER_URLS[0],
-            VERSIONED_INSTALLER_URLS[1],
             "pipx install socratic-learn",
             "\nsocratic\n",
+            "npx @socraticlearn/cli",
             'socratic "I want to learn linear algebra"',
             "socratic --agent pi",
             "socratic --here",
@@ -584,19 +580,28 @@ class RepositoryValidationTests(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertGreater(position, previous)
             previous = position
-        self.assertIn(NATIVE_RELEASE_CAVEAT, normalized_quick_start)
         self.assertIn(PYPI_RELEASE_CAVEAT, normalized_quick_start)
+        self.assertIn(NPM_RELEASE_CAVEAT, normalized_quick_start)
+        normalized_lower = normalized_quick_start.lower()
         self.assertLess(
-            normalized_quick_start.index(NATIVE_RELEASE_CAVEAT),
-            normalized_quick_start.index(VERSIONED_INSTALLER_URLS[0]),
+            normalized_lower.index(PYPI_RELEASE_CAVEAT.lower()),
+            normalized_lower.index("pipx install socratic-learn"),
         )
         self.assertLess(
-            normalized_quick_start.index(PYPI_RELEASE_CAVEAT),
-            normalized_quick_start.index("pipx install socratic-learn"),
+            normalized_lower.index(NPM_RELEASE_CAVEAT.lower()),
+            normalized_lower.index("npx @socraticlearn/cli"),
         )
         self.assertNotIn("raw.githubusercontent.com", quick_start)
+        self.assertNotIn("marcos-guilherme", quick_start.lower())
         self.assertNotRegex(quick_start, r"(?is)\birm\b[^\n|]*\|\s*iex\b")
         self.assertNotRegex(quick_start, r"(?is)\bcurl\b[^\n|]*\|\s*(?:ba)?sh\b")
+        for retired in (
+            "install.ps1",
+            "socratic update",
+            "smartscreen",
+        ):
+            with self.subTest(retired=retired):
+                self.assertNotIn(retired, without_fenced_code(quick_start).lower())
 
     def test_launcher_and_distribution_docs_define_public_contracts(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -622,18 +627,30 @@ class RepositoryValidationTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         installation_normalized = " ".join(installation.split()).lower()
         for clause in (
-            "x86-64",
-            "sha-256",
-            "unsigned",
-            "rollback",
+            "pipx install socratic-learn",
+            "npx @socraticlearn/cli",
+            "python 3.11",
+            "pipx",
+            "node",
             "pipx upgrade socratic-learn",
             "pipx uninstall socratic-learn",
-            "preserves learner data",
+            "preserves learner",
+            "project-adapter",
+            "socratic install",
+            BRANDED_REPOSITORY_URL.lower(),
         ):
             with self.subTest(document="installation", clause=clause):
                 self.assertIn(clause, installation_normalized)
-        self.assertIn(NATIVE_RELEASE_CAVEAT.lower(), installation_normalized)
         self.assertIn(PYPI_RELEASE_CAVEAT.lower(), installation_normalized)
+        self.assertIn(NPM_RELEASE_CAVEAT.lower(), installation_normalized)
+        intro = installation.split("## Source and project-adapter requirements", 1)[0]
+        for retired in (
+            "native channel behavior",
+            "install.sh",
+            "channel.json",
+        ):
+            with self.subTest(retired=retired):
+                self.assertNotIn(retired, without_fenced_code(intro).lower())
         self.assertNotIn("raw.githubusercontent.com", installation)
         self.assertNotRegex(installation, r"(?is)\birm\b[^\n|]*\|\s*iex\b")
         self.assertNotRegex(
@@ -1137,20 +1154,22 @@ class RepositoryValidationTests(unittest.TestCase):
                 path = root / relative
                 original = path.read_text(encoding="utf-8")
                 unsafe = re.sub(
-                    r"Native installation is\s+available only after GitHub "
-                    r"Release\s+v0[.]1[.]0 is published[.]",
-                    "Install the native release.",
+                    r"The documented pipx command becomes available only after\s+"
+                    r"socratic-learn is published on\s+PyPI[.]",
+                    "Install with pipx.",
                     original,
+                    flags=re.IGNORECASE,
                 )
                 unsafe = re.sub(
-                    r"The pipx command is available only after\s+"
-                    r"socratic-learn 0[.]1[.]0 is published on\s+PyPI[.]",
-                    "Install with pipx.",
+                    r"The npm command becomes available only after\s+"
+                    r"@socraticlearn/cli is published[.]",
+                    "Run with npx.",
                     unsafe,
+                    flags=re.IGNORECASE,
                 )
                 path.write_text(unsafe, encoding="utf-8")
                 self.assertIn(
-                    f"{relative} must condition native and PyPI instructions "
+                    f"{relative} must condition PyPI and npm instructions "
                     "on publication",
                     validate(root),
                 )
@@ -1161,27 +1180,18 @@ class RepositoryValidationTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         unsafe_examples = (
             (
-                VERSIONED_INSTALLER_URLS[0],
-                "https://raw.githubusercontent.com/marcos-guilherme/"
-                "socratic-learn/main/scripts/install.ps1",
+                "pipx install socratic-learn",
+                "pipx install socratic-learn\n\n"
+                "https://raw.githubusercontent.com/org/repo/main/scripts/install.ps1\n",
             ),
             (
-                VERSIONED_INSTALLER_URLS[0],
-                "https://github.com/marcos-guilherme/socratic-learn/"
-                "raw/main/scripts/install.ps1",
+                "pipx install socratic-learn",
+                "curl -fsSL https://example.invalid/install.sh | bash",
             ),
             (
-                VERSIONED_INSTALLER_URLS[1],
-                "https://github.com/marcos-guilherme/socratic-learn/"
-                "blob/main/scripts/install.sh",
+                "npx @socraticlearn/cli",
+                "IWR $url | Invoke-Expression",
             ),
-            (
-                VERSIONED_INSTALLER_URLS[0],
-                "https://github.com/marcos-guilherme/socratic-learn/"
-                "releases/latest/download/install.ps1",
-            ),
-            ("& $installer", "IWR $url | Invoke-Expression"),
-            ("sh \"$installer\"", "wget -qO- $url | bash"),
         )
         for relative in ("README.md", "docs/universal-installation.md"):
             path = root / relative
@@ -1236,24 +1246,26 @@ class RepositoryValidationTests(unittest.TestCase):
                     any(pattern.search(command) for pattern in UNSAFE_INSTALLER_PATTERNS)
                 )
 
-    def test_validator_requires_each_exact_installer_url_on_each_surface(self) -> None:
+    def test_validator_rejects_retired_native_terms_on_active_surfaces(self) -> None:
         temp, root = self.make_root()
         self.addCleanup(temp.cleanup)
-        for relative in ("README.md", "docs/universal-installation.md"):
-            path = root / relative
-            original = path.read_text(encoding="utf-8")
-            for url in VERSIONED_INSTALLER_URLS:
-                with self.subTest(relative=relative, url=url):
-                    path.write_text(
-                        original.replace(url, "https://example.invalid/installer", 1),
-                        encoding="utf-8",
-                    )
-                    self.assertIn(
-                        f"{relative} must use exact v0.1.0 PowerShell and "
-                        "POSIX installer URLs",
-                        validate(root),
-                    )
-            path.write_text(original, encoding="utf-8")
+        readme = root / "README.md"
+        original = readme.read_text(encoding="utf-8")
+        readme.write_text(
+            original.replace(
+                "## Quick start",
+                "## Quick start\n\nSee install.ps1 for native setup.\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        self.assertTrue(
+            any(
+                "retired native installation assets" in error
+                for error in validate(root)
+            ),
+            validate(root),
+        )
 
     def test_repository_uses_mit_license(self) -> None:
         root = Path(__file__).resolve().parents[1]

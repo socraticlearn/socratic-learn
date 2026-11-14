@@ -242,17 +242,23 @@ README_LAUNCHER_REQUIREMENTS = (
     'socratic "i want to learn linear algebra"',
     "socratic --agent pi",
     "socratic --here",
-    "socratic update",
-    "socratic uninstall",
     "pipx install socratic-learn",
+    "npx @socraticlearn/cli",
+    "pipx upgrade socratic-learn",
+    "pipx uninstall socratic-learn",
     "no repository clone",
     "does not store provider credentials",
     "shell history",
-    "unsigned",
-    "smartscreen",
-    "gatekeeper",
+    "python 3.11",
+    "pipx",
+    "node",
+    "neither bundles",
     "pi, claude code, and antigravity",
     "cursor remains a project integration",
+    "project-adapter",
+    "socratic install",
+    "preserves learner",
+    "https://github.com/socraticlearn/socratic-learn",
 )
 SESSION_PROTOCOL_RESUME_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
@@ -469,27 +475,49 @@ MANIFEST_REFERENCE_VERSION_PATTERNS = (
     *MANIFEST_REFERENCE_CONFORMANCE_PATTERNS,
     *MANIFEST_REFERENCE_VERSION_POLICY_PATTERNS,
 )
-NATIVE_RELEASE_CAVEAT = (
-    "native installation is available only after github release v0.1.0 "
-    "is published."
-)
 PYPI_RELEASE_CAVEAT = (
-    "the pipx command is available only after socratic-learn 0.1.0 "
-    "is published on pypi."
+    "the documented pipx command becomes available only after "
+    "socratic-learn is published on pypi."
 )
-VERSIONED_INSTALLER_URLS = (
-    "https://github.com/marcos-guilherme/socratic-learn/releases/download/"
-    "v0.1.0/install.ps1",
-    "https://github.com/marcos-guilherme/socratic-learn/releases/download/"
-    "v0.1.0/install.sh",
+NPM_RELEASE_CAVEAT = (
+    "the npm command becomes available only after @socraticlearn/cli is "
+    "published."
 )
+BRANDED_REPOSITORY_URL = "https://github.com/socraticlearn/socratic-learn"
 README_ONBOARDING_ORDER = (
-    *VERSIONED_INSTALLER_URLS,
     "pipx install socratic-learn",
     "\nsocratic\n",
+    "npx @socraticlearn/cli",
     'socratic "i want to learn linear algebra"',
     "socratic --agent pi",
     "socratic --here",
+)
+RETIRED_ACTIVE_INSTALLATION_TERMS = (
+    "install.ps1",
+    "install.sh",
+    "pyinstaller",
+    "smartscreen",
+    "gatekeeper",
+    "release-manifest",
+    "channel.json",
+    "native channel behavior",
+    "socratic update",
+    "socratic uninstall",
+    "marcos-guilherme",
+    "self-replacement",
+    "sha256sums",
+)
+ACTIVE_INSTALLATION_SURFACES = (
+    (
+        "README.md",
+        "## Quick start",
+        "## Choose an AI host",
+    ),
+    (
+        "docs/universal-installation.md",
+        "## Normal installation",
+        "## Source and project-adapter requirements",
+    ),
 )
 UNSAFE_INSTALLER_PATTERNS = (
     re.compile(
@@ -2034,19 +2062,8 @@ def validate(root: Path) -> list[str]:
         ):
             errors.append("README.md public onboarding is out of order")
 
-    installer_docs = (
-        (
-            root / "README.md",
-            "## Quick start",
-            "## Choose an AI host",
-        ),
-        (
-            root / "docs/universal-installation.md",
-            "## Normal installation",
-            "## Native channel behavior",
-        ),
-    )
-    for path, section_start, section_end in installer_docs:
+    for relative, section_start, section_end in ACTIVE_INSTALLATION_SURFACES:
+        path = root / relative
         if not path.is_file():
             continue
         text = path.read_text(encoding="utf-8")
@@ -2057,36 +2074,37 @@ def validate(root: Path) -> list[str]:
             else ""
         )
         normalized_text = normalize(section_text).lower()
-        exact_urls_present = all(
-            url in normalized_text for url in VERSIONED_INSTALLER_URLS
-        )
-        if not exact_urls_present:
-            relative = path.relative_to(root).as_posix()
-            errors.append(
-                f"{relative} must use exact v0.1.0 PowerShell and POSIX "
-                "installer URLs"
-            )
         caveats_are_contextual = (
-            NATIVE_RELEASE_CAVEAT in normalized_text
-            and PYPI_RELEASE_CAVEAT in normalized_text
-            and exact_urls_present
+            PYPI_RELEASE_CAVEAT in normalized_text
+            and NPM_RELEASE_CAVEAT in normalized_text
             and "pipx install socratic-learn" in normalized_text
-            and normalized_text.index(NATIVE_RELEASE_CAVEAT)
-            < min(
-                normalized_text.index(url)
-                for url in VERSIONED_INSTALLER_URLS
-            )
+            and "npx @socraticlearn/cli" in normalized_text
             and normalized_text.index(PYPI_RELEASE_CAVEAT)
             < normalized_text.index("pipx install socratic-learn")
+            and normalized_text.index(NPM_RELEASE_CAVEAT)
+            < normalized_text.index("npx @socraticlearn/cli")
         )
         if not caveats_are_contextual:
-            relative = path.relative_to(root).as_posix()
             errors.append(
-                f"{relative} must condition native and PyPI instructions "
+                f"{relative} must condition PyPI and npm instructions "
                 "on publication"
             )
-        if any(pattern.search(text) for pattern in UNSAFE_INSTALLER_PATTERNS):
-            relative = path.relative_to(root).as_posix()
+        visible = without_fenced_code(section_text).lower()
+        retired_hits = [
+            term
+            for term in RETIRED_ACTIVE_INSTALLATION_TERMS
+            if term in visible
+        ]
+        if retired_hits:
+            errors.append(
+                f"{relative} must not describe retired native installation "
+                f"assets: {', '.join(retired_hits)}"
+            )
+        if BRANDED_REPOSITORY_URL not in text and relative == "README.md":
+            errors.append(
+                "README.md must link to the branded Socratic Learn repository"
+            )
+        if any(pattern.search(section_text) for pattern in UNSAFE_INSTALLER_PATTERNS):
             errors.append(
                 f"{relative} contains unsafe or mutable installer instructions"
             )

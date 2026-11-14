@@ -3,86 +3,85 @@
 ## Normal installation
 
 Normal users install once and run `socratic`; they do not clone or build this
-repository. Native installers are intended for x86-64 Windows, Linux, and
-macOS artifacts. Native installation is available only after GitHub Release
-v0.1.0 is published. When that release exists, download the exact versioned
-asset to a temporary file and review it before execution.
-
-```powershell
-$installer = Join-Path $env:TEMP "socratic-install-v0.1.0.ps1"
-Invoke-WebRequest https://github.com/marcos-guilherme/socratic-learn/releases/download/v0.1.0/install.ps1 -OutFile $installer
-Get-Content $installer
-```
-
-After reviewing the downloaded file, run `& $installer`.
-
-```sh
-installer=$(mktemp)
-curl -fL https://github.com/marcos-guilherme/socratic-learn/releases/download/v0.1.0/install.sh -o "$installer"
-cat "$installer"
-```
-
-After reviewing the downloaded file, run `sh "$installer"` and then
-`rm -f "$installer"`.
-
-These instructions are conditional; this documentation does not claim that a
-public release or tag already exists.
-The first native binaries are unsigned. The installers warn that Windows
-SmartScreen or macOS Gatekeeper may intervene and require confirmation before
-download. SHA-256 verification proves that downloaded bytes match release
-metadata; it does not replace platform signing or notarization.
-
-For unsupported architectures, the installer names the pipx fallback. That
-fallback is conditional too:
-
-The pipx command is available only after socratic-learn 0.1.0 is published on
-PyPI. This documentation does not claim that the package is currently
-available there.
+repository for day-to-day learning. The primary route uses
+[pipx](https://pipx.pypa.io/) with [Python 3.11 or newer](https://www.python.org/downloads/).
+The documented pipx command becomes available only after socratic-learn is
+published on PyPI. This guide does not claim that the package is already on
+PyPI.
 
 ```text
 pipx install socratic-learn
 ```
 
-The pipx fallback requires Python 3.11 or newer and is also suitable when a
-Python-managed environment is preferred.
+After installation, run `socratic` from any directory. With no goal on the
+command line, the launcher opens a small menu for a new session, recent saved
+entries, and legacy imports. Pi, Claude Code, or Antigravity must already be
+installed and authenticated; Socratic Learn does not bundle a host, model,
+provider, or credentials.
 
-## Native channel behavior
+## Optional npm invocation
 
-The installer places `socratic` in a user-owned binary directory and records
-non-secret native channel metadata at `~/.socratic-learn/channel.json`. The
-metadata contains the schema version, the `native` channel name, the absolute
-executable path, and the canonical release-manifest URL. It contains no
-provider credentials.
+An optional route uses [Node.js](https://nodejs.org/) plus Python 3.11+.
+The npm command becomes available only after @socraticlearn/cli is published.
+This guide does not claim that the npm scope or package is already published.
 
-The Windows installer selects one exact `windows`/`x86_64` manifest artifact,
-then verifies its declared size and SHA-256 digest. The POSIX installer selects
-`socratic-linux-x86_64` or `socratic-macos-x86_64` and verifies the unique
-matching entry in `SHA256SUMS`. Redirects remain inside each installer's
-documented trusted boundary.
+```text
+npx @socraticlearn/cli
+```
 
-`socratic update` downloads and verifies a replacement before publication.
-On POSIX it atomically replaces the executable; on Windows a detached helper
-waits for the running process to exit before replacement. Download or
-verification failure removes staging and preserves the previous executable:
-this is the update rollback guarantee.
+`npx` downloads and runs the adapter on demand. It runs the same Python
+implementation as the pipx package. Neither route installs Pi, Claude Code,
+Antigravity, or any provider credentials for you.
 
-`socratic uninstall` removes the native executable and channel metadata but
-preserves learner data by default. `socratic uninstall --delete-data` requires
-interactive confirmation; `--yes` is accepted only with `--delete-data`.
+## Prerequisites and setup links
 
-## Pipx channel behavior
+| Route | Requires |
+| --- | --- |
+| pipx (primary) | Python 3.11+, pipx |
+| npx (optional) | Node.js, Python 3.11+ |
+| Either route | A supported host: Pi, Claude Code, or Antigravity |
 
-An installation with no native channel metadata is treated as Python/pipx
-managed. Socratic Learn never rewrites or removes that environment. Instead:
+Official setup:
 
-- `socratic update` prints `pipx upgrade socratic-learn`;
-- `socratic uninstall` prints `pipx uninstall socratic-learn`.
+- Python: [python.org/downloads](https://www.python.org/downloads/)
+- pipx: [pipx.pypa.io](https://pipx.pypa.io/)
+- Node.js: [nodejs.org](https://nodejs.org/)
 
-Pipx itself owns package update and removal. Learner profiles, progress, and
-sessions under `~/.socratic-learn/learning/` remain separate, so package
-removal preserves learner data.
+Repository and issue tracking:
+[https://github.com/socraticlearn/socratic-learn](https://github.com/socraticlearn/socratic-learn)
 
-## Source and project-adapter requirements
+## Upgrades, removal, and preserved learner data
+
+Pipx owns package lifecycle:
+
+```text
+pipx upgrade socratic-learn
+pipx uninstall socratic-learn
+```
+
+Package installation has no launcher-owned update or uninstall command.
+Package removal preserves learner profiles, progress, sessions,
+and other private records under `~/.socratic-learn/learning/`. Delete those
+directories yourself only when you intend to remove learner data.
+
+For `npx`, each invocation resolves the package at run time. Upgrades follow
+npm publishing; uninstalling a global npm copy is not required for occasional
+`npx` use.
+
+## Host ownership and first-run behavior
+
+The launcher host supplies the terminal, provider authentication, model
+selection, quotas, and optional tools. Socratic Learn supplies the learning
+method, private workspace, and session checkpoints. Running `socratic` starts the
+interactive new or resume menu unless you pass a goal, use `socratic --here`, or
+run `socratic read` with a source.
+
+## Source and development installation
+
+Contributors clone the repository, build the checked-in distribution, and run
+tests locally. Package installation above is separate from project-adapter
+installation below. Registry packages do not use a `socratic install` command;
+adapters are installed with `python -m socratic_learn install`.
 
 Use Python 3.11 or newer from the repository root. The distribution supports
 exactly four project-local targets: `generic`, `cursor`, `claude-code`, and
