@@ -17,3 +17,6 @@ __pycache__/
 /dist/*.tar.gz
 
 /.semantic-runs/
+
+packages/npm-cli/vendor/
+packages/npm-cli/*.tgz

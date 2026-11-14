@@ -1,0 +1,23 @@
+{
+  "name": "@socraticlearn/cli",
+  "version": "0.1.0",
+  "description": "Node launcher for Socratic Learn (Python 3.11+)",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "vendor/",
+    "LICENSE",
+    "README.md",
+    "vendor-requirements.lock"
+  ],
+  "bin": {
+    "socratic": "bin/socratic.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}
