@@ -53,23 +53,52 @@ jobs:
       - name: Validate repository
         run: python tests/validate_repository.py
       - name: Build wheel and source distribution
-        run: python -m build --outdir release-dist
-      - name: Smoke test installed socratic read
+        run: python -m build --sdist --wheel --outdir release-dist
+      - name: Validate exact artifacts
         shell: python
         run: |
+          import os
           import pathlib
           import sys
 
           root = pathlib.Path.cwd()
-          sys.path.insert(0, str(root))
+          sys.path.insert(0, os.getcwd())
+          from socratic_learn import __version__
+
+          dist = root / "release-dist"
+          expected = {
+              dist / f"socratic_learn-{__version__}-py3-none-any.whl",
+              dist / f"socratic_learn-{__version__}.tar.gz",
+          }
+          actual = {path for path in dist.iterdir() if path.is_file()}
+          if actual != expected:
+              raise SystemExit(
+                  f"release artifacts mismatch: expected {sorted(expected)!r}, "
+                  f"found {sorted(actual)!r}"
+              )
+      - name: Validate package metadata
+        run: python -m twine check release-dist/*
+      - name: Smoke test installed socratic read
+        shell: python
+        run: |
+          import os
+          import pathlib
+          import sys
+
+          root = pathlib.Path.cwd()
+          sys.path.insert(0, os.getcwd())
+          from socratic_learn import __version__
+
           # Gate: socratic read --agent pi minimal-text.pdf explain its evidence
           from tests.read_smoke import run_wheel_read_smoke
 
-          run_wheel_read_smoke(root)
+          wheel = root / "release-dist" / f"socratic_learn-{__version__}-py3-none-any.whl"
+          run_wheel_read_smoke(root, wheel=wheel)
       - uses: actions/upload-artifact@v4
         with:
           name: python-package
           path: release-dist/*
+          if-no-files-found: error
 
   publish-github:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')

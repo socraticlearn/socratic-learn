@@ -588,6 +588,7 @@ def markdown_files(root: Path) -> list[Path]:
         for path in root.rglob("*.md")
         if path.is_file()
         and ".git" not in path.relative_to(root).parts
+        and ".superpowers" not in path.relative_to(root).parts
         and "workspace" not in path.relative_to(root).parts
     ]
 
@@ -1131,38 +1132,6 @@ def workflow_job(text: str, name: str) -> str:
     return match.group(0) if match else ""
 
 
-def workflow_matrix_include_entries(job: str) -> list[dict[str, str]]:
-    entries: list[dict[str, str]] = []
-    current: dict[str, str] | None = None
-    in_include = False
-    for line in job.splitlines():
-        if line == "        include:":
-            in_include = True
-            continue
-        if not in_include:
-            continue
-        if line.startswith("          - "):
-            if current is not None:
-                entries.append(current)
-            current = {}
-            field = line[12:]
-        elif current is not None and line.startswith("            "):
-            field = line[12:]
-        else:
-            if current is not None:
-                entries.append(current)
-            break
-        if ":" not in field:
-            continue
-        key, value = field.split(":", 1)
-        value = value.split(" #", 1)[0].strip()
-        current[key.strip()] = value.strip('"\'')
-    else:
-        if current is not None:
-            entries.append(current)
-    return entries
-
-
 def workflow_steps(job: str) -> list[str]:
     return [
         match.group(0)
@@ -1276,28 +1245,6 @@ def workflow_uses_run_shell_defaults(text: str) -> bool:
     return False
 
 
-def workflow_python_assignment_matches(
-    step: str,
-    name: str,
-    expected_expression: str,
-) -> bool:
-    try:
-        statements = ast.parse(workflow_run_block(step)).body
-        expected = ast.parse(expected_expression, mode="eval").body
-    except SyntaxError:
-        return False
-    assignments = [
-        statement.value
-        for statement in statements
-        if isinstance(statement, ast.Assign)
-        and any(
-            isinstance(target, ast.Name) and target.id == name
-            for target in statement.targets
-        )
-    ]
-    return len(assignments) == 1 and ast.dump(assignments[0]) == ast.dump(expected)
-
-
 def workflow_python_tree(step: str) -> ast.Module | None:
     if not workflow_step_uses_python_shell(step):
         return None
@@ -1401,11 +1348,32 @@ def validate_release_automation(root: Path) -> list[str]:
         except tomllib.TOMLDecodeError as error:
             errors.append(f"pyproject.toml is invalid: {error}")
         else:
+            project_metadata = project.get("project", {})
             dependencies = project.get("project", {}).get("dependencies", [])
             if dependencies != [RUNTIME_PDF_DEPENDENCY]:
                 errors.append(
                     "pyproject.toml must declare exactly "
                     f"{RUNTIME_PDF_DEPENDENCY} as the runtime dependency"
+                )
+            if (
+                project_metadata.get("name") != "socratic-learn"
+                or project_metadata.get("requires-python") != ">=3.11"
+                or project_metadata.get("scripts")
+                != {"socratic": "socratic_learn.cli:entry_point"}
+            ):
+                errors.append("pyproject.toml must preserve canonical package identity")
+            if project_metadata.get("urls") != {
+                "Homepage": "https://github.com/socraticlearn/socratic-learn",
+                "Repository": "https://github.com/socraticlearn/socratic-learn",
+                "Issues": "https://github.com/socraticlearn/socratic-learn/issues",
+            }:
+                errors.append("pyproject.toml must use branded project URLs")
+            if project_metadata.get("optional-dependencies", {}).get("build") != [
+                "build>=1.2,<2",
+                "twine>=6,<7",
+            ]:
+                errors.append(
+                    "pyproject.toml build extra must include bounded build and Twine"
                 )
 
     release_path = root / ".github/workflows/release.yml"
@@ -1494,6 +1462,94 @@ def validate_release_automation(root: Path) -> list[str]:
             errors.append(
                 "PyPI publishing must wait for the Python package job"
             )
+        if any(
+            marker in release_lower
+            for marker in (
+                "skip-existing",
+                "pypi_api_token",
+                "twine_password",
+                "api-token:",
+                "password:",
+            )
+        ):
+            errors.append(
+                "PyPI publishing must not use skip-existing or registry tokens"
+            )
+
+        python_package = workflow_job(release, "python-package")
+        build_step = workflow_step(
+            python_package,
+            "Build wheel and source distribution",
+        )
+        artifact_step = workflow_step(
+            python_package,
+            "Validate exact artifacts",
+        )
+        exact_artifact_markers = (
+            "expected = {",
+            "socratic_learn-{__version__}-py3-none-any.whl",
+            "socratic_learn-{__version__}.tar.gz",
+            "actual = {path for path in dist.iterdir() if path.is_file()}",
+            "if actual != expected:",
+        )
+        if (
+            "run: python -m build --sdist --wheel --outdir release-dist"
+            not in build_step
+            or not all(marker in artifact_step for marker in exact_artifact_markers)
+        ):
+            errors.append(
+                "Release workflow must build exactly one versioned wheel and sdist"
+            )
+
+        twine_step = workflow_step(
+            python_package,
+            "Validate package metadata",
+        )
+        if "run: python -m twine check release-dist/*" not in twine_step:
+            errors.append(
+                "Release workflow must validate distributions with Twine"
+            )
+
+        smoke_step = workflow_step(
+            python_package,
+            "Smoke test installed socratic read",
+        )
+        exact_wheel_markers = (
+            'wheel = root / "release-dist" / '
+            'f"socratic_learn-{__version__}-py3-none-any.whl"',
+            "run_wheel_read_smoke(root, wheel=wheel)",
+        )
+        if not all(marker in smoke_step for marker in exact_wheel_markers):
+            errors.append(
+                "Release workflow smoke must use the exact release-dist wheel"
+            )
+
+        upload = workflow_action_step(
+            python_package,
+            "actions/upload-artifact@v4",
+        )
+        if workflow_action_input(upload, "if-no-files-found") != "error":
+            errors.append(
+                "Release artifact upload must fail when files are missing"
+            )
+        shared_artifact = all(
+            "needs: python-package" in job
+            and workflow_action_input(
+                workflow_action_step(job, "actions/download-artifact@v4"),
+                "name",
+            )
+            == "python-package"
+            for job in (github_publish, pypi_publish)
+        )
+        if (
+            workflow_action_input(upload, "name") != "python-package"
+            or workflow_action_input(upload, "path") != "release-dist/*"
+            or not shared_artifact
+        ):
+            errors.append(
+                "GitHub Release and PyPI must consume the same "
+                "python-package artifact"
+            )
 
         version_job = workflow_job(release, "verify-version")
         if (
@@ -1531,7 +1587,7 @@ def validate_release_automation(root: Path) -> list[str]:
                 f"{label} must smoke-test installed socratic read with fake hosts"
             )
         if any(marker in workflow for marker in INTERPRETER_ONLY_PDF_SMOKE_MARKERS):
-            if "run_wheel_read_smoke" not in workflow and "run_frozen_read_smoke" not in workflow:
+            if "run_wheel_read_smoke" not in workflow:
                 errors.append(
                     f"{label} must not rely on interpreter-only PdfReader smoke"
                 )

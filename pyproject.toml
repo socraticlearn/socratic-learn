@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.27,<2"]
+requires = ["hatchling>=1.27,<1.28"]
 build-backend = "hatchling.build"
 
 [project]
@@ -24,15 +24,16 @@ dependencies = [
 [project.optional-dependencies]
 build = [
   "build>=1.2,<2",
+  "twine>=6,<7",
 ]
 
 [project.scripts]
 socratic = "socratic_learn.cli:entry_point"
 
 [project.urls]
-Homepage = "https://github.com/marcos-guilherme/socratic-learn"
-Repository = "https://github.com/marcos-guilherme/socratic-learn"
-Issues = "https://github.com/marcos-guilherme/socratic-learn/issues"
+Homepage = "https://github.com/socraticlearn/socratic-learn"
+Repository = "https://github.com/socraticlearn/socratic-learn"
+Issues = "https://github.com/socraticlearn/socratic-learn/issues"
 
 [tool.hatch.version]
 path = "socratic_learn/__init__.py"

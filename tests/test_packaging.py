@@ -9,9 +9,53 @@ import tomllib
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 
 class PackagingTests(unittest.TestCase):
+    def test_build_backend_emits_twine_compatible_metadata(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        project = tomllib.loads((root / "pyproject.toml").read_text("utf-8"))
+
+        self.assertEqual(
+            ["hatchling>=1.27,<1.28"],
+            project["build-system"]["requires"],
+        )
+
+    def test_project_urls_use_branded_repository(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        project = tomllib.loads((root / "pyproject.toml").read_text("utf-8"))
+
+        self.assertEqual(
+            {
+                "Homepage": "https://github.com/socraticlearn/socratic-learn",
+                "Repository": "https://github.com/socraticlearn/socratic-learn",
+                "Issues": (
+                    "https://github.com/socraticlearn/socratic-learn/issues"
+                ),
+            },
+            project["project"]["urls"],
+        )
+
+    def test_canonical_package_metadata_is_complete(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        project = tomllib.loads((root / "pyproject.toml").read_text("utf-8"))
+
+        self.assertEqual("socratic-learn", project["project"]["name"])
+        self.assertEqual(">=3.11", project["project"]["requires-python"])
+        self.assertEqual(
+            {"socratic": "socratic_learn.cli:entry_point"},
+            project["project"]["scripts"],
+        )
+        self.assertEqual(
+            ["pypdf>=7.0,<8"],
+            project["project"]["dependencies"],
+        )
+        self.assertEqual(
+            ["build>=1.2,<2", "twine>=6,<7"],
+            project["project"]["optional-dependencies"]["build"],
+        )
+
     def test_runtime_declares_exact_pypdf_dependency(self) -> None:
         root = Path(__file__).resolve().parents[1]
         project = tomllib.loads((root / "pyproject.toml").read_text("utf-8"))
@@ -258,3 +302,34 @@ class PackagingTests(unittest.TestCase):
             )
 
         self.assertEqual(before_repository, repository_state(repository))
+
+    def test_installed_smoke_uses_supplied_prebuilt_wheel(self) -> None:
+        from tests.read_smoke import prepare_installed_read_smoke
+
+        repository = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            smoke_root = Path(temporary)
+            wheel = smoke_root / "socratic_learn-0.1.0-py3-none-any.whl"
+            wheel.write_bytes(b"prebuilt wheel")
+            environment = smoke_root / "venv"
+            python = environment / "python"
+            console = environment / "socratic"
+
+            with (
+                patch("tests.read_smoke.build_wheel") as build_wheel,
+                patch(
+                    "tests.read_smoke.create_virtualenv",
+                    return_value=(environment, python, console),
+                ),
+                patch("tests.read_smoke.install_wheel") as install_wheel,
+                patch("tests.read_smoke.install_fake_agents"),
+            ):
+                layout = prepare_installed_read_smoke(
+                    repository,
+                    smoke_root,
+                    wheel=wheel,
+                )
+
+            build_wheel.assert_not_called()
+            install_wheel.assert_called_once_with(python, wheel)
+            self.assertEqual(wheel, layout.wheel)

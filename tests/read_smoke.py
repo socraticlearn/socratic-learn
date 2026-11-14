@@ -1,4 +1,4 @@
-"""Installed and frozen console read-mode smoke helpers."""
+"""Installed-wheel console read-mode smoke helpers."""
 
 from __future__ import annotations
 
@@ -125,7 +125,7 @@ class ReadSmokeLayout:
     python: Path
     console: Path
     record: Path
-    wheelhouse: Path
+    wheel: Path
 
 
 @dataclass(frozen=True)
@@ -195,6 +195,7 @@ def install_wheel(python: Path, wheel: Path) -> None:
             "install",
             str(wheel),
         ],
+        env=isolated_run_environment({}),
         check=True,
         capture_output=True,
         text=True,
@@ -263,9 +264,16 @@ def install_fake_agents(
     record_path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def prepare_installed_read_smoke(repository: Path, root: Path) -> ReadSmokeLayout:
-    wheelhouse = root / "wheelhouse"
-    wheel = build_wheel(repository, wheelhouse)
+def prepare_installed_read_smoke(
+    repository: Path,
+    root: Path,
+    *,
+    wheel: Path | None = None,
+) -> ReadSmokeLayout:
+    if wheel is None:
+        wheel = build_wheel(repository, root / "wheelhouse")
+    elif not wheel.is_file():
+        raise FileNotFoundError(f"prebuilt wheel not found: {wheel}")
     _environment, python, console = create_virtualenv(root)
     install_wheel(python, wheel)
     scripts = _scripts_directory(root / "venv")
@@ -285,7 +293,7 @@ def prepare_installed_read_smoke(repository: Path, root: Path) -> ReadSmokeLayou
         python=python,
         console=console,
         record=record,
-        wheelhouse=wheelhouse,
+        wheel=wheel,
     )
 
 
@@ -467,30 +475,12 @@ def boundary_context_for_wheel_layout(
     sibling_sentinel: Path,
     sentinel_before: bytes,
 ) -> PrivateBoundaryContext:
-    wheels = tuple(layout.wheelhouse.glob("*.whl"))
     return PrivateBoundaryContext(
         isolated_home=layout.home,
         repository=repository,
         sibling_sentinel=sibling_sentinel,
         sentinel_before=sentinel_before,
-        package_artifacts=wheels,
-    )
-
-
-def boundary_context_for_frozen_run(
-    *,
-    home: Path,
-    repository: Path,
-    sibling_sentinel: Path,
-    sentinel_before: bytes,
-    frozen_binary: Path,
-) -> PrivateBoundaryContext:
-    return PrivateBoundaryContext(
-        isolated_home=home,
-        repository=repository,
-        sibling_sentinel=sibling_sentinel,
-        sentinel_before=sentinel_before,
-        package_artifacts=(frozen_binary,),
+        package_artifacts=(layout.wheel,),
     )
 
 
@@ -504,6 +494,7 @@ def enforce_repository_clean_after_smoke(
 def run_wheel_read_smoke(
     repository: Path | None = None,
     *,
+    wheel: Path | None = None,
     agent: AgentName = "pi",
     goal: str = "explain its evidence",
 ) -> None:
@@ -517,7 +508,11 @@ def run_wheel_read_smoke(
         smoke_root = Path(temporary)
         pdf = smoke_root / "minimal-text.pdf"
         pdf.write_bytes(fixture.read_bytes())
-        layout = prepare_installed_read_smoke(root, smoke_root)
+        layout = prepare_installed_read_smoke(
+            root,
+            smoke_root,
+            wheel=wheel,
+        )
         fake_bin = smoke_root / "fake-bin"
         sibling, sentinel = prepare_sibling_sentinel(smoke_root)
         before_repo = repository_state(root)
@@ -548,86 +543,6 @@ def run_wheel_read_smoke(
                 repository=root,
                 sibling_sentinel=sibling,
                 sentinel_before=sentinel,
-            )
-        )
-
-
-def run_frozen_read_smoke(
-    binary: Path,
-    repository: Path | None = None,
-    *,
-    goal: str = "explain its evidence",
-) -> None:
-    root = repository or Path.cwd()
-    fixture = root / "tests" / "fixtures" / "sources" / "minimal-text.pdf"
-    if not fixture.is_file():
-        raise SystemExit(f"missing fixture: {fixture}")
-    if not binary.is_file():
-        raise SystemExit(f"missing frozen binary: {binary}")
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as temporary:
-        smoke_root = Path(temporary)
-        pdf = smoke_root / "minimal-text.pdf"
-        pdf.write_bytes(fixture.read_bytes())
-        fake_bin = smoke_root / "fake-bin"
-        record = smoke_root / "read-smoke-record.json"
-        home = smoke_root / "home"
-        home.mkdir()
-        sibling, sentinel = prepare_sibling_sentinel(smoke_root)
-        before_repo = repository_state(root)
-        _, fake_python, _ = create_virtualenv(smoke_root / "fake-venv")
-        install_fake_agents(
-            python=fake_python,
-            fake_bin=fake_bin,
-            record_path=record,
-        )
-        run_environment = isolated_run_environment(
-            {
-                "FAKE_HOST_RECORD": str(record),
-                "FAKE_HOST_EXIT": "17",
-                "HOME": str(home),
-                "USERPROFILE": str(home),
-                "SOCRATIC_LEARN_HOME": str(home),
-                "PATH": os.pathsep.join([str(fake_bin)]),
-            }
-        )
-        result = subprocess.run(
-            [
-                str(binary.resolve()),
-                "read",
-                "--agent",
-                "pi",
-                str(pdf),
-                *goal.split(),
-            ],
-            cwd=smoke_root,
-            env=run_environment,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        receipt = load_receipt(record)
-        workspace = home / "learning"
-        assert_read_receipt_contract(
-            receipt,
-            agent="pi",
-            goal=goal,
-            expected_cwd=workspace.resolve(),
-        )
-        if result.returncode != 17:
-            raise SystemExit(
-                f"expected child exit 17, got {result.returncode}: "
-                f"{result.stdout}\n{result.stderr}"
-            )
-        enforce_repository_clean_after_smoke(root, before_repo)
-        assert_private_bundle_boundary(
-            boundary_context_for_frozen_run(
-                home=home,
-                repository=root,
-                sibling_sentinel=sibling,
-                sentinel_before=sentinel,
-                frozen_binary=binary.resolve(),
             )
         )
 

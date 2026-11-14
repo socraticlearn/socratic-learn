@@ -2058,6 +2058,141 @@ class RepositoryValidationTests(unittest.TestCase):
                 self.assertIn(marker, normal)
         self.assertNotIn("from pypdf import PdfReader", normal)
 
+    def test_release_verifies_the_exact_versioned_artifact_set(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        release = (root / ".github/workflows/release.yml").read_text("utf-8")
+
+        self.assertIn(
+            "python -m build --sdist --wheel --outdir release-dist",
+            release,
+        )
+        self.assertIn("socratic_learn-{__version__}-py3-none-any.whl", release)
+        self.assertIn("socratic_learn-{__version__}.tar.gz", release)
+        self.assertIn("actual != expected", release)
+
+    def test_release_checks_metadata_and_smokes_the_exact_wheel(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        release = (root / ".github/workflows/release.yml").read_text("utf-8")
+
+        self.assertIn("python -m twine check release-dist/*", release)
+        self.assertIn("run_wheel_read_smoke(root, wheel=wheel)", release)
+        self.assertIn(
+            'wheel = root / "release-dist" / '
+            'f"socratic_learn-{__version__}-py3-none-any.whl"',
+            release,
+        )
+
+    def test_release_upload_and_publish_share_verified_artifact(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        release = (root / ".github/workflows/release.yml").read_text("utf-8")
+        github = release.split("  publish-github:", 1)[1].split(
+            "  publish-pypi:",
+            1,
+        )[0]
+        pypi = release.split("  publish-pypi:", 1)[1]
+
+        self.assertIn("if-no-files-found: error", release)
+        for job in (github, pypi):
+            self.assertIn("needs: python-package", job)
+            self.assertIn("actions/download-artifact@v4", job)
+            self.assertIn("name: python-package", job)
+
+    def test_validator_rejects_inexact_artifact_build_and_validation(self) -> None:
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+        release = root / ".github/workflows/release.yml"
+        release.write_text(
+            release.read_text(encoding="utf-8")
+            .replace(
+                "python -m build --sdist --wheel --outdir release-dist",
+                "python -m build --outdir release-dist",
+                1,
+            )
+            .replace("          expected = {\n", "          expected = set()\n", 1),
+            encoding="utf-8",
+        )
+
+        errors = validate(root)
+
+        self.assertIn(
+            "Release workflow must build exactly one versioned wheel and sdist",
+            errors,
+        )
+
+    def test_validator_requires_twine_and_exact_wheel_smoke(self) -> None:
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+        release = root / ".github/workflows/release.yml"
+        release.write_text(
+            release.read_text(encoding="utf-8")
+            .replace(
+                "python -m twine check release-dist/*",
+                "python -m pip check",
+                1,
+            )
+            .replace(
+                "run_wheel_read_smoke(root, wheel=wheel)",
+                "run_wheel_read_smoke(root)",
+                1,
+            ),
+            encoding="utf-8",
+        )
+
+        errors = validate(root)
+
+        self.assertIn(
+            "Release workflow must validate distributions with Twine",
+            errors,
+        )
+        self.assertIn(
+            "Release workflow smoke must use the exact release-dist wheel",
+            errors,
+        )
+
+    def test_validator_requires_strict_shared_artifact_upload(self) -> None:
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+        release = root / ".github/workflows/release.yml"
+        text = release.read_text(encoding="utf-8").replace(
+            "if-no-files-found: error",
+            "if-no-files-found: warn",
+            1,
+        )
+        before_pypi, pypi = text.split("  publish-pypi:", 1)
+        pypi = pypi.replace("name: python-package", "name: other-package", 1)
+        release.write_text(
+            before_pypi + "  publish-pypi:" + pypi,
+            encoding="utf-8",
+        )
+
+        errors = validate(root)
+
+        self.assertIn(
+            "Release artifact upload must fail when files are missing",
+            errors,
+        )
+        self.assertIn(
+            "GitHub Release and PyPI must consume the same python-package artifact",
+            errors,
+        )
+
+    def test_validator_rejects_pypi_tokens_and_skip_existing(self) -> None:
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+        release = root / ".github/workflows/release.yml"
+        release.write_text(
+            release.read_text(encoding="utf-8")
+            + "\n# pypi registry configuration\n"
+            + "skip-existing: true\n"
+            + "password: ${{ secrets.PYPI_API_TOKEN }}\n",
+            encoding="utf-8",
+        )
+
+        self.assertIn(
+            "PyPI publishing must not use skip-existing or registry tokens",
+            validate(root),
+        )
+
     def test_active_release_files_exclude_retired_native_terms(self) -> None:
         root = Path(__file__).resolve().parents[1]
         active_files = (
