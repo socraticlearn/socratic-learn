@@ -62,8 +62,6 @@ def _ordered_section_map(text: str) -> dict[str, str]:
                 raise integrity("session record has an unexpected heading")
             if line != SESSION_HEADINGS[expected_index]:
                 raise integrity("session record headings are out of order")
-            if line in sections:
-                raise integrity("session record has duplicate headings")
             current = line
             sections[current] = []
             expected_index += 1
@@ -89,7 +87,10 @@ def parse_session_heading(text: str) -> tuple[str, str]:
     if match is None:
         raise integrity("session record heading is not valid")
     session_date = validate_calendar_date(match.group(1))
-    return session_date, match.group(2).strip()
+    display_title = match.group(2).strip()
+    if not display_title:
+        raise integrity("session record heading is not valid")
+    return session_date, display_title
 
 
 def parse_session_record(text: str) -> ParsedSessionRecord:

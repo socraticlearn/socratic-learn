@@ -309,6 +309,82 @@ class ThreadStorageTests(unittest.TestCase):
             threads_root(self.records) / imported.id / "sessions" / imported.latest_encounter
         )
         self.assertTrue(copied.is_file())
+        self.assertFalse(imported.latest_encounter.startswith("pending-"))
+        self.assertNotEqual(legacy.name, imported.latest_encounter)
+
+    def test_import_legacy_renames_pending_like_sources_to_final_encounter(self) -> None:
+        legacy = self.records / "sessions" / "pending-evil.md"
+        legacy.write_text(
+            _valid_session_body(
+                title="History: Ancient trade routes",
+                next_step="Map one additional route.",
+                session_date="2026-01-15",
+            ),
+            encoding="utf-8",
+        )
+        imported = import_legacy_session(self.records, legacy)
+        self.assertFalse(imported.latest_encounter.startswith("pending-"))
+
+    def test_legacy_whitespace_heading_topic_is_rejected(self) -> None:
+        legacy = self.records / "sessions" / "blank-title.md"
+        lines = _valid_session_body(
+            title="Math: Topic",
+            next_step="Continue.",
+            session_date="2026-01-15",
+        ).splitlines()
+        lines[0] = "# Session: 2026-01-15 —    "
+        legacy.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with self.assertRaises(IntegrityError):
+            discover_legacy_sessions(self.records)
+
+    def test_create_pending_encounter_validates_thread_metadata_first(self) -> None:
+        created = create_thread(self.records, goal="validate metadata")
+        metadata_path = threads_root(self.records) / created.id / "thread.json"
+        metadata_path.write_text("{}\n", encoding="utf-8")
+        with self.assertRaises(IntegrityError):
+            create_pending_encounter(self.records, created.id)
+
+    def test_finalize_rejects_pending_already_referenced_by_metadata(self) -> None:
+        thread = create_thread(self.records, goal="referenced")
+        pending = create_pending_encounter(self.records, thread.id)
+        metadata_path = threads_root(self.records) / thread.id / "thread.json"
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        payload["latest_encounter"] = pending.name
+        metadata_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        pending.write_text(
+            _valid_session_body(title="Math: Referenced", next_step="Stop."),
+            encoding="utf-8",
+        )
+        with self.assertRaises(IntegrityError):
+            finalize_thread_encounter(self.records, thread.id, pending)
+
+    def test_finalize_succeeds_when_pending_cleanup_fails(self) -> None:
+        thread = create_thread(self.records, goal="cleanup optional")
+        pending = create_pending_encounter(self.records, thread.id)
+        pending.write_text(
+            _valid_session_body(title="Science: Cleanup", next_step="Continue."),
+            encoding="utf-8",
+        )
+        with mock.patch("pathlib.Path.unlink", side_effect=OSError("busy")):
+            finalized = finalize_thread_encounter(self.records, thread.id, pending)
+        self.assertEqual("complete", finalized.status)
+
+    def test_finalize_retry_after_commit_avoids_duplicate_finals(self) -> None:
+        thread = create_thread(self.records, goal="retry")
+        pending = create_pending_encounter(self.records, thread.id)
+        body = _valid_session_body(title="Physics: Retry", next_step="Continue.")
+        pending.write_text(body, encoding="utf-8")
+        with mock.patch("pathlib.Path.unlink", side_effect=OSError("busy")):
+            first = finalize_thread_encounter(self.records, thread.id, pending)
+        second = finalize_thread_encounter(self.records, thread.id, pending)
+        self.assertEqual(first.latest_encounter, second.latest_encounter)
+        sessions = threads_root(self.records) / thread.id / "sessions"
+        finals = [
+            path
+            for path in sessions.iterdir()
+            if path.is_file() and not path.name.startswith("pending-")
+        ]
+        self.assertEqual(1, len(finals))
 
     def test_import_malformed_legacy_leaves_no_thread(self) -> None:
         legacy = self.records / "sessions" / "broken.md"

@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .errors import IntegrityError
 from .thread_parsing import (
+    parse_session_heading,
     parse_session_record,
     validate_legacy_session_content,
 )
@@ -60,6 +61,13 @@ def _require_regular_file(path: Path, description: str) -> None:
         raise integrity(f"{description} could not be inspected", path=path) from error
     if not stat.S_ISREG(status.st_mode):
         raise integrity(f"{description} must be a regular file", path=path)
+
+
+def _best_effort_unlink(path: Path) -> None:
+    try:
+        path.unlink()
+    except OSError:
+        pass
 
 
 def _remove_tree(path: Path) -> None:
@@ -219,6 +227,7 @@ def create_pending_encounter(
     path: Path | None = None,
 ) -> Path:
     validate_storage_ancestry(records, thread_id=thread_id)
+    load_thread(records, thread_id)
     _thread_dir, sessions_dir, _metadata_path = require_thread_workspace(records, thread_id)
 
     if path is None:
@@ -284,6 +293,11 @@ def finalize_thread_encounter(
     _require_regular_file(pending, "pending encounter record")
 
     current = load_thread(records, thread_id)
+    if current.latest_encounter is not None and current.latest_encounter == pending.name:
+        raise integrity(
+            "pending encounter is already referenced by thread metadata",
+            path=pending,
+        )
 
     try:
         payload = pending.read_bytes()
@@ -292,6 +306,16 @@ def finalize_thread_encounter(
         raise integrity("encounter record is not valid UTF-8", path=pending) from error
     except OSError as error:
         raise integrity("encounter record could not be read", path=pending) from error
+
+    if current.latest_encounter is not None:
+        existing_final = sessions_dir / current.latest_encounter
+        if existing_final.is_file() and not existing_final.is_symlink():
+            try:
+                if existing_final.read_bytes() == payload:
+                    _best_effort_unlink(pending)
+                    return current
+            except OSError:
+                pass
 
     final_path = _publish_final_encounter(sessions_dir, session_date=parsed.session_date, payload=payload)
     updated = ThreadRecord(
@@ -315,10 +339,7 @@ def finalize_thread_encounter(
             pass
         raise
 
-    try:
-        pending.unlink()
-    except OSError as error:
-        raise integrity("pending encounter record could not be removed", path=pending) from error
+    _best_effort_unlink(pending)
     return updated
 
 
@@ -416,29 +437,6 @@ def discover_legacy_sessions(records: Path) -> tuple[LegacySessionSummary, ...]:
     return tuple(discovered)
 
 
-def _copy_encounter_exclusive(source: Path, destination: Path) -> None:
-    _require_regular_file(source, "legacy session record")
-    if destination.exists() or destination.is_symlink():
-        raise integrity("encounter record already exists", path=destination)
-    try:
-        payload = source.read_bytes()
-    except OSError as error:
-        raise integrity("legacy session could not be read", path=source) from error
-    try:
-        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError as error:
-        raise integrity("encounter record already exists", path=destination) from error
-    except OSError as error:
-        raise integrity("encounter record could not be created", path=destination) from error
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-    except OSError as error:
-        raise integrity("encounter record could not be created", path=destination) from error
-
-
 def import_legacy_session(records: Path, legacy_path: Path) -> ThreadRecord:
     validate_storage_ancestry(records)
     resolved = require_legacy_within_records(records, legacy_path)
@@ -452,15 +450,19 @@ def import_legacy_session(records: Path, legacy_path: Path) -> ThreadRecord:
         raise integrity("legacy session could not be read", path=resolved) from error
 
     display_title, next_step, refined_title = validate_legacy_session_content(text)
+    session_date, _heading_title = parse_session_heading(text)
     status = "complete" if refined_title is not None else "incomplete"
+    payload = text.encode("utf-8")
 
     record = create_thread(records, goal=display_title, provisional_title=display_title)
-    thread_dir, _sessions_dir, metadata_path = require_thread_workspace(records, record.id)
-    encounter_name = validate_safe_filename(resolved.name, path=resolved, label="legacy session filename")
-    destination = thread_dir / _SESSIONS_DIRNAME / encounter_name
+    thread_dir, sessions_dir, metadata_path = require_thread_workspace(records, record.id)
 
     try:
-        _copy_encounter_exclusive(resolved, destination)
+        final_path = _publish_final_encounter(
+            sessions_dir,
+            session_date=session_date,
+            payload=payload,
+        )
         imported = ThreadRecord(
             id=record.id,
             provisional_title=record.provisional_title,
@@ -469,7 +471,7 @@ def import_legacy_session(records: Path, legacy_path: Path) -> ThreadRecord:
             status=status,
             created_at=record.created_at,
             updated_at=utc_now_timestamp(),
-            latest_encounter=encounter_name,
+            latest_encounter=final_path.name,
             next_step=next_step,
         )
         _save_thread_metadata(metadata_path, imported)

@@ -27,6 +27,7 @@ _THREAD_KEYS = frozenset(
     }
 )
 _VALID_STATUSES = frozenset({"active", "incomplete", "complete"})
+_PENDING_PREFIX = "pending-"
 _CANONICAL_UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
@@ -108,6 +109,18 @@ def validate_canonical_thread_id(thread_id: str, *, path: Path | None = None) ->
     return canonical
 
 
+def validate_final_encounter_filename(
+    name: str,
+    *,
+    path: Path | None = None,
+    label: str = "latest encounter",
+) -> str:
+    validated = validate_safe_filename(name, path=path, label=label)
+    if validated.startswith(_PENDING_PREFIX):
+        raise integrity("latest encounter must not reference a pending record", path=path)
+    return validated
+
+
 def validate_safe_filename(name: str, *, path: Path | None = None, label: str = "filename") -> str:
     if type(name) is not str or not name or name in {".", ".."}:
         raise integrity(f"{label} is not valid", path=path)
@@ -185,10 +198,9 @@ def document_to_record(
     if document["latest_encounter"] is None:
         latest_encounter = None
     else:
-        latest_encounter = validate_safe_filename(
+        latest_encounter = validate_final_encounter_filename(
             document["latest_encounter"],
             path=path,
-            label="latest encounter",
         )
         if sessions_dir is not None:
             encounter_path = sessions_dir / latest_encounter
