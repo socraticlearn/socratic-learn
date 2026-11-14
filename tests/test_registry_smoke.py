@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -15,8 +15,10 @@ from tests.registry_smoke import (
     assert_missing_host_guidance,
     build_pipx_install_argv,
     build_pipx_upgrade_argv,
+    checkout_root,
     learner_sentinel_path,
     npm_exec_argv,
+    production_run_command,
     run_local_artifact_smoke,
     run_registry_smoke,
     wait_for_registry,
@@ -40,7 +42,7 @@ class RegistrySmokeCommandTests(unittest.TestCase):
             "1.2.3",
             RegistrySmokeSource.local(wheel=wheel, npm_tarball=Path("/tmp/pkg.tgz")),
         )
-        self.assertEqual(argv[-2:], ["--force", str(wheel)])
+        self.assertEqual(argv[-2:], ["--force", str(wheel.resolve())])
         self.assertIn("install", argv)
 
     def test_build_pipx_upgrade_argv_targets_distribution_name(self) -> None:
@@ -55,10 +57,10 @@ class RegistrySmokeCommandTests(unittest.TestCase):
         )
         self.assertIn("@socraticlearn/cli@2.0.0", argv)
         self.assertEqual(argv[-2:], ["socratic", "--version"])
-        self.assertTrue(
-            Path(argv[0]).name.lower().startswith(("npx", "npm")),
-            argv[0],
-        )
+        self.assertIn("--", argv)
+        package_index = argv.index("--package")
+        self.assertEqual(argv[package_index + 1], "@socraticlearn/cli@2.0.0")
+        self.assertEqual(argv[package_index + 2], "--")
 
     def test_npm_exec_argv_uses_local_tarball(self) -> None:
         tarball = Path("/artifacts/socraticlearn-cli-2.0.0.tgz")
@@ -70,9 +72,10 @@ class RegistrySmokeCommandTests(unittest.TestCase):
                 npm_tarball=tarball,
             ),
         )
+        package_index = argv.index("--package")
+        self.assertEqual(argv[package_index + 1], str(tarball.resolve()))
+        self.assertIn("--", argv)
         self.assertEqual(argv[-2:], ["socratic", "--version"])
-        self.assertIn("--package", argv)
-        self.assertTrue(any(tarball.name in entry for entry in argv), argv)
 
     def test_assert_exact_version_output_accepts_canonical_line(self) -> None:
         assert_exact_version_output("socratic-learn 4.5.6\n", "4.5.6")
@@ -172,6 +175,76 @@ class RegistrySmokeRetryTests(unittest.TestCase):
             )
 
 
+class RegistrySmokeProductionRunnerTests(unittest.TestCase):
+    def test_production_run_command_sets_safe_path_and_cwd(self) -> None:
+        cwd = Path("/tmp/isolated-smoke-cwd")
+        with mock.patch(
+            "tests.registry_smoke.subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, "", ""),
+        ) as run:
+            production_run_command(["socratic", "--version"], {}, cwd)
+        _, kwargs = run.call_args
+        self.assertEqual(kwargs["cwd"], cwd)
+        self.assertEqual(kwargs["env"]["PYTHONSAFEPATH"], "1")
+        self.assertNotIn("PYTHONPATH", kwargs["env"])
+
+    def test_run_registry_smoke_uses_isolated_cwd_for_every_subprocess(self) -> None:
+        version = "0.4.1"
+        isolated = Path("/tmp/outside-checkout-smoke")
+        checkout = checkout_root()
+        recorded: list[Path] = []
+
+        def run(
+            argv: list[str],
+            env: dict[str, str],
+            cwd: Path,
+        ) -> subprocess.CompletedProcess[str]:
+            recorded.append(cwd.resolve())
+            if len(argv) >= 4 and argv[2] == "pipx":
+                return subprocess.CompletedProcess([], 0, "", "")
+            if argv[:2] == ["socratic", "--version"]:
+                return subprocess.CompletedProcess(
+                    [],
+                    0,
+                    f"socratic-learn {version}\n",
+                    "",
+                )
+            if argv[:2] == ["socratic", "registry-smoke-goal"]:
+                return subprocess.CompletedProcess(
+                    [],
+                    2,
+                    "",
+                    "error: no compatible agent was found\n"
+                    "install Pi, Claude Code, or Antigravity and retry\n",
+                )
+            if Path(argv[0]).name.lower().startswith(("npx", "npm")):
+                return subprocess.CompletedProcess(
+                    [],
+                    0,
+                    f"socratic-learn {version}\n",
+                    "",
+                )
+            return subprocess.CompletedProcess([], 0, "", "")
+
+        with mock.patch("tests.registry_smoke.wait_for_registry"):
+            run_registry_smoke(
+                version,
+                run_command=run,
+                home_root=Path("/tmp/registry-smoke-home"),
+                work_cwd=isolated,
+                checkout=checkout,
+            )
+
+        self.assertTrue(recorded)
+        self.assertTrue(all(path == isolated.resolve() for path in recorded))
+        self.assertNotIn(checkout.resolve(), recorded)
+        for path in recorded:
+            checkout_resolved = checkout.resolve()
+            self.assertFalse(
+                checkout_resolved in path.parents or path == checkout_resolved
+            )
+
+
 class RegistrySmokeRunnerTests(unittest.TestCase):
     def _runner(
         self,
@@ -181,11 +254,15 @@ class RegistrySmokeRunnerTests(unittest.TestCase):
         def _key(argv: list[str]) -> tuple[str, ...]:
             if len(argv) >= 4 and argv[1] == "-m" and argv[2] == "pipx":
                 return tuple(["pipx", *argv[3:]])
-            if Path(argv[0]).name.lower().startswith("npx"):
+            if Path(argv[0]).name.lower().startswith(("npx", "npm")):
                 return tuple(["npx", *argv[1:]])
             return tuple(argv)
 
-        def run(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        def run(
+            argv: list[str],
+            env: dict[str, str],
+            cwd: Path,
+        ) -> subprocess.CompletedProcess[str]:
             key = _key(argv)
             if key not in commands:
                 raise AssertionError(f"unexpected command: {argv!r} ({key!r})")
@@ -196,7 +273,7 @@ class RegistrySmokeRunnerTests(unittest.TestCase):
     def test_run_registry_smoke_executes_registry_sequence(self) -> None:
         version = "0.4.1"
         commands: dict[tuple[str, ...], subprocess.CompletedProcess[str]] = {
-            ("pipx", "install", f"socratic-learn=={version}"): subprocess.CompletedProcess(  # noqa: duplicate key style
+            ("pipx", "install", f"socratic-learn=={version}"): subprocess.CompletedProcess(
                 [],
                 0,
                 "",
@@ -232,7 +309,9 @@ class RegistrySmokeRunnerTests(unittest.TestCase):
             (
                 "npx",
                 "--yes",
+                "--package",
                 f"@socraticlearn/cli@{version}",
+                "--",
                 "socratic",
                 "--version",
             ): subprocess.CompletedProcess(
@@ -264,6 +343,7 @@ class RegistrySmokeRunnerTests(unittest.TestCase):
                 version,
                 run_command=self._runner(commands=commands),
                 home_root=Path("/tmp/registry-smoke"),
+                work_cwd=Path("/tmp/registry-smoke-work"),
             )
             wait.assert_called_once()
             self.assertTrue(sentinel_writes)
@@ -277,7 +357,11 @@ class RegistrySmokeRunnerTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        def run(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        def run(
+            argv: list[str],
+            env: dict[str, str],
+            cwd: Path,
+        ) -> subprocess.CompletedProcess[str]:
             if argv == ["socratic", "--version"]:
                 return subprocess.CompletedProcess([], 0, f"socratic-learn {version}\n", "")
             if argv == ["socratic", "registry-smoke-goal"]:
@@ -290,7 +374,7 @@ class RegistrySmokeRunnerTests(unittest.TestCase):
                         "install Pi, Claude Code, or Antigravity and retry\n"
                     ),
                 )
-            if Path(argv[0]).name.lower().startswith("npx"):
+            if Path(argv[0]).name.lower().startswith(("npx", "npm")):
                 return subprocess.CompletedProcess([], 0, f"socratic-learn {version}\n", "")
             return subprocess.CompletedProcess([], 0, "", "")
 
@@ -302,6 +386,7 @@ class RegistrySmokeRunnerTests(unittest.TestCase):
                 version,
                 run_command=run,
                 home_root=sentinel.parents[2],
+                work_cwd=Path("/tmp/registry-smoke-work"),
             )
         self.assertEqual(
             sentinel.read_text(encoding="utf-8"),
@@ -320,6 +405,83 @@ class LocalArtifactSmokeTests(unittest.TestCase):
             npm_tarball=Path("pkg.tgz"),
         )
         self.assertFalse(source.uses_registry())
+        from tests.registry_smoke import _forbidden_registry_probe
+
+        with self.assertRaisesRegex(RegistrySmokeError, "must not query the PyPI"):
+            _forbidden_registry_probe("PyPI")("0.1.0")
+
+    def test_run_local_artifact_smoke_uses_wheel_install_and_reinstall(self) -> None:
+        version = "0.1.0"
+        with tempfile.TemporaryDirectory() as temporary:
+            artifact_root = Path(temporary)
+            wheel = artifact_root / "socratic_learn-0.1.0-py3-none-any.whl"
+            tarball = artifact_root / "socraticlearn-cli-0.1.0.tgz"
+            wheel.write_bytes(b"wheel")
+            tarball.write_bytes(b"tarball")
+            self._assert_local_wheel_smoke(version, wheel, tarball)
+
+    def _assert_local_wheel_smoke(
+        self,
+        version: str,
+        wheel: Path,
+        tarball: Path,
+    ) -> None:
+        pipx_installs: list[list[str]] = []
+
+        def run(
+            argv: list[str],
+            env: dict[str, str],
+            cwd: Path,
+        ) -> subprocess.CompletedProcess[str]:
+            if len(argv) >= 4 and argv[2] == "pipx" and argv[3] == "install":
+                pipx_installs.append(argv)
+                return subprocess.CompletedProcess([], 0, "", "")
+            if argv[:2] == ["socratic", "--version"]:
+                return subprocess.CompletedProcess(
+                    [],
+                    0,
+                    f"socratic-learn {version}\n",
+                    "",
+                )
+            if argv[:2] == ["socratic", "registry-smoke-goal"]:
+                return subprocess.CompletedProcess(
+                    [],
+                    2,
+                    "",
+                    "error: no compatible agent was found\n"
+                    "install Pi, Claude Code, or Antigravity and retry\n",
+                )
+            if Path(argv[0]).name.lower().startswith(("npx", "npm")):
+                return subprocess.CompletedProcess(
+                    [],
+                    0,
+                    f"socratic-learn {version}\n",
+                    "",
+                )
+            if len(argv) >= 4 and argv[2] == "pipx" and argv[3] == "uninstall":
+                return subprocess.CompletedProcess([], 0, "", "")
+            return subprocess.CompletedProcess([], 0, "", "")
+
+        with mock.patch("tests.registry_smoke.wait_for_registry") as wait:
+            run_local_artifact_smoke(
+                version,
+                wheel=wheel,
+                npm_tarball=tarball,
+                run_command=run,
+                home_root=Path("/tmp/local-smoke-home"),
+                work_cwd=Path("/tmp/local-smoke-work"),
+                checkout=Path("/tmp/local-smoke-checkout"),
+            )
+            wait.assert_not_called()
+
+        self.assertEqual(len(pipx_installs), 2)
+        for install in pipx_installs:
+            self.assertIn("--force", install)
+            self.assertEqual(install[-1], str(wheel.resolve()))
+        self.assertNotIn(
+            "upgrade",
+            [token for install in pipx_installs for token in install],
+        )
 
 
 class RegistrySmokeWorkflowTests(unittest.TestCase):
@@ -341,6 +503,7 @@ class RegistrySmokeWorkflowTests(unittest.TestCase):
         self.assertIn("ubuntu-latest", job)
         self.assertIn("macos-latest", job)
         self.assertIn("matrix:", job)
+        self.assertIn("fail-fast: false", job)
 
     def test_verify_registry_depends_on_both_publish_jobs(self) -> None:
         job = self._verify_registry_job()

@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -44,17 +45,24 @@ class RegistrySmokeSource:
     def local(*, wheel: Path, npm_tarball: Path) -> RegistrySmokeSource:
         return RegistrySmokeSource(
             "local",
-            wheel_path=wheel,
-            npm_tarball=npm_tarball,
+            wheel_path=wheel.resolve(),
+            npm_tarball=npm_tarball.resolve(),
         )
 
     def uses_registry(self) -> bool:
         return self.mode == "registry"
 
 
-CommandRunner = Callable[[list[str], dict[str, str]], subprocess.CompletedProcess[str]]
+CommandRunner = Callable[
+    [list[str], dict[str, str], Path],
+    subprocess.CompletedProcess[str],
+]
 RegistryProbe = Callable[[str], bool]
 SleepFn = Callable[[float], None]
+
+
+def checkout_root() -> Path:
+    return Path(__file__).resolve().parents[1]
 
 
 def _pipx_invocation() -> list[str]:
@@ -86,16 +94,6 @@ def build_pipx_uninstall_argv() -> list[str]:
     return [*_pipx_invocation(), "uninstall", "socratic-learn"]
 
 
-def _npm_exec_prefix(*, package: str) -> list[str]:
-    npx = shutil.which("npx")
-    if npx:
-        return [npx, "--yes", package]
-    npm = shutil.which("npm")
-    if npm:
-        return [npm, "exec", "--yes", f"--package={package}", "--"]
-    raise RegistrySmokeError("npm or npx is required for registry smoke")
-
-
 def npm_exec_argv(
     version: str,
     command: Sequence[str],
@@ -106,13 +104,14 @@ def npm_exec_argv(
     else:
         if source.npm_tarball is None:
             raise RegistrySmokeError("local npm exec requires a tarball path")
-        package = str(source.npm_tarball.resolve())
-    prefix = _npm_exec_prefix(package=package)
-    if Path(prefix[0]).name.lower().startswith("npm"):
-        return [*prefix, *command]
-    if Path(prefix[0]).name.lower().startswith("npx") and source.mode == "local":
-        return [prefix[0], "--yes", "--package", package, *command]
-    return [*prefix, *command]
+        package = str(source.npm_tarball)
+    npx = shutil.which("npx")
+    if npx:
+        return [npx, "--yes", "--package", package, "--", *command]
+    npm = shutil.which("npm")
+    if npm:
+        return [npm, "exec", "--yes", f"--package={package}", "--", *command]
+    raise RegistrySmokeError("npm or npx is required for registry smoke")
 
 
 def learner_sentinel_path(home_root: Path) -> Path:
@@ -180,6 +179,15 @@ def _probe_npm_registry(version: str) -> bool:
     return payload.get("version") == version
 
 
+def _forbidden_registry_probe(label: str) -> RegistryProbe:
+    def probe(version: str) -> bool:
+        raise RegistrySmokeError(
+            f"local artifact smoke must not query the {label} registry"
+        )
+
+    return probe
+
+
 def wait_for_registry(
     version: str,
     *,
@@ -207,10 +215,18 @@ def wait_for_registry(
         sleep(delay_seconds)
 
 
-def _default_run(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def production_run_command(
+    argv: list[str],
+    env: dict[str, str],
+    cwd: Path,
+) -> subprocess.CompletedProcess[str]:
+    safe_env = dict(env)
+    safe_env.pop("PYTHONPATH", None)
+    safe_env["PYTHONSAFEPATH"] = "1"
     return subprocess.run(
         argv,
-        env=env,
+        env=safe_env,
+        cwd=cwd,
         check=False,
         capture_output=True,
         text=True,
@@ -230,6 +246,7 @@ def _smoke_environment(home_root: Path, pipx_home: Path, pipx_bin: Path) -> dict
     environment.pop("PYTHONPATH", None)
     environment.pop("PYTHONIOENCODING", None)
     environment.pop("PYTHONUTF8", None)
+    environment["PYTHONSAFEPATH"] = "1"
     learn_home = home_root / ".socratic-learn"
     learn_home.mkdir(parents=True, exist_ok=True)
     environment["SOCRATIC_LEARN_HOME"] = str(learn_home)
@@ -245,14 +262,42 @@ def _smoke_environment(home_root: Path, pipx_home: Path, pipx_bin: Path) -> dict
     return environment
 
 
+def _isolated_work_cwd(*, checkout: Path, home_root: Path) -> Path:
+    checkout_resolved = checkout.resolve()
+    candidate = home_root.parent / "work"
+    candidate.mkdir(parents=True, exist_ok=True)
+    work_resolved = candidate.resolve()
+    if (
+        checkout_resolved == work_resolved
+        or checkout_resolved in work_resolved.parents
+        or work_resolved in checkout_resolved.parents
+    ):
+        candidate = Path(tempfile.mkdtemp(prefix="registry-smoke-cwd-"))
+    else:
+        for parent in (work_resolved, *work_resolved.parents):
+            if parent == checkout_resolved:
+                candidate = Path(tempfile.mkdtemp(prefix="registry-smoke-cwd-"))
+                break
+    candidate.mkdir(parents=True, exist_ok=True)
+    work_resolved = candidate.resolve()
+    if (
+        checkout_resolved == work_resolved
+        or checkout_resolved in work_resolved.parents
+        or work_resolved in checkout_resolved.parents
+    ):
+        raise RegistrySmokeError("smoke subprocess cwd must stay outside checkout")
+    return candidate
+
+
 def _run_checked(
     *,
     argv: list[str],
     env: dict[str, str],
+    cwd: Path,
     run_command: CommandRunner,
     context: str,
 ) -> subprocess.CompletedProcess[str]:
-    completed = run_command(argv, env)
+    completed = run_command(argv, env, cwd)
     if completed.returncode != 0:
         raise RegistrySmokeError(
             f"{context} failed ({completed.returncode}): "
@@ -282,6 +327,7 @@ def _python_smoke(
     home_root: Path,
     pipx_home: Path,
     pipx_bin: Path,
+    work_cwd: Path,
     run_command: CommandRunner,
 ) -> None:
     environment = _smoke_environment(home_root, pipx_home, pipx_bin)
@@ -289,10 +335,11 @@ def _python_smoke(
     _run_checked(
         argv=install_argv,
         env=environment,
+        cwd=work_cwd,
         run_command=run_command,
         context="pipx install",
     )
-    version_result = run_command(["socratic", "--version"], environment)
+    version_result = run_command(["socratic", "--version"], environment, work_cwd)
     if version_result.returncode != 0:
         raise RegistrySmokeError(
             "pipx-installed socratic --version failed: "
@@ -307,6 +354,7 @@ def _python_smoke(
     host_result = run_command(
         ["socratic", "registry-smoke-goal"],
         host_environment,
+        work_cwd,
     )
     assert_missing_host_guidance(host_result)
     _sentinel_survives_uninstall(home_root)
@@ -314,6 +362,7 @@ def _python_smoke(
         _run_checked(
             argv=build_pipx_upgrade_argv(),
             env=environment,
+            cwd=work_cwd,
             run_command=run_command,
             context="pipx upgrade",
         )
@@ -321,12 +370,14 @@ def _python_smoke(
         _run_checked(
             argv=build_pipx_install_argv(version, source),
             env=environment,
+            cwd=work_cwd,
             run_command=run_command,
             context="pipx reinstall",
         )
     _run_checked(
         argv=build_pipx_uninstall_argv(),
         env=environment,
+        cwd=work_cwd,
         run_command=run_command,
         context="pipx uninstall",
     )
@@ -340,11 +391,12 @@ def _npm_smoke(
     home_root: Path,
     pipx_home: Path,
     pipx_bin: Path,
+    work_cwd: Path,
     run_command: CommandRunner,
 ) -> None:
     environment = _smoke_environment(home_root, pipx_home, pipx_bin)
     argv = npm_exec_argv(version, ["socratic", "--version"], source)
-    completed = run_command(argv, environment)
+    completed = run_command(argv, environment, work_cwd)
     if completed.returncode != 0:
         raise RegistrySmokeError(
             "npm exec socratic --version failed: "
@@ -359,8 +411,10 @@ def _npm_smoke(
 def run_registry_smoke(
     version: str,
     *,
-    run_command: CommandRunner = _default_run,
+    run_command: CommandRunner = production_run_command,
     home_root: Path | None = None,
+    work_cwd: Path | None = None,
+    checkout: Path | None = None,
     probe_pypi: RegistryProbe = _probe_pypi_registry,
     probe_npm: RegistryProbe = _probe_npm_registry,
     sleep: SleepFn = time.sleep,
@@ -369,11 +423,13 @@ def run_registry_smoke(
     source: RegistrySmokeSource | None = None,
 ) -> None:
     source = source or RegistrySmokeSource.registry()
-    root = home_root or Path.cwd() / ".registry-smoke"
+    repository = checkout or checkout_root()
+    root = home_root or Path(tempfile.mkdtemp(prefix="registry-smoke-home-"))
     pipx_home = root / "pipx"
     pipx_bin = root / "pipx-bin"
     pipx_home.mkdir(parents=True, exist_ok=True)
     pipx_bin.mkdir(parents=True, exist_ok=True)
+    cwd = work_cwd or _isolated_work_cwd(checkout=repository, home_root=root)
 
     if source.uses_registry():
         wait_for_registry(
@@ -391,6 +447,7 @@ def run_registry_smoke(
         home_root=root,
         pipx_home=pipx_home,
         pipx_bin=pipx_bin,
+        work_cwd=cwd,
         run_command=run_command,
     )
     _npm_smoke(
@@ -399,6 +456,7 @@ def run_registry_smoke(
         home_root=root,
         pipx_home=pipx_home,
         pipx_bin=pipx_bin,
+        work_cwd=cwd,
         run_command=run_command,
     )
 
@@ -408,18 +466,29 @@ def run_local_artifact_smoke(
     *,
     wheel: Path,
     npm_tarball: Path,
-    run_command: CommandRunner = _default_run,
+    run_command: CommandRunner = production_run_command,
     home_root: Path | None = None,
+    work_cwd: Path | None = None,
+    checkout: Path | None = None,
 ) -> None:
-    if not wheel.is_file():
-        raise RegistrySmokeError(f"local wheel not found: {wheel}")
-    if not npm_tarball.is_file():
-        raise RegistrySmokeError(f"local npm tarball not found: {npm_tarball}")
+    resolved_wheel = wheel.resolve()
+    resolved_tarball = npm_tarball.resolve()
+    if not resolved_wheel.is_file():
+        raise RegistrySmokeError(f"local wheel not found: {resolved_wheel}")
+    if not resolved_tarball.is_file():
+        raise RegistrySmokeError(f"local npm tarball not found: {resolved_tarball}")
     run_registry_smoke(
         version,
         run_command=run_command,
         home_root=home_root,
-        source=RegistrySmokeSource.local(wheel=wheel, npm_tarball=npm_tarball),
+        work_cwd=work_cwd,
+        checkout=checkout,
+        probe_pypi=_forbidden_registry_probe("PyPI"),
+        probe_npm=_forbidden_registry_probe("npm"),
+        source=RegistrySmokeSource.local(
+            wheel=resolved_wheel,
+            npm_tarball=resolved_tarball,
+        ),
     )
 
 

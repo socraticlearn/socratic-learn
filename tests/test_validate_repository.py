@@ -4015,6 +4015,7 @@ class SynchronizedRegistryReleaseTests(unittest.TestCase):
         self.assertIn("publish-pypi", head)
         self.assertIn("publish-npm", head)
         self.assertIn("matrix:", head)
+        self.assertIn("fail-fast: false", head)
         for runner in ("windows-latest", "ubuntu-latest", "macos-latest"):
             with self.subTest(runner=runner):
                 self.assertIn(runner, head)

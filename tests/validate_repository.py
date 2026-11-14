@@ -1766,6 +1766,10 @@ def validate_release_automation(root: Path) -> list[str]:
                 )
             else:
                 matrix = matrix_section[1].split("steps:", 1)[0]
+                if "fail-fast: false" not in matrix:
+                    errors.append(
+                        "Registry verification matrix must not fail fast across runners"
+                    )
                 for runner in (
                     "windows-latest",
                     "ubuntu-latest",
