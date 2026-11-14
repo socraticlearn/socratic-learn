@@ -48,7 +48,11 @@ from evaluation.session import (
     run_session,
     verify_run_isolation,
 )
-from tests.launch_contract import parse_source_inputs
+from tests.launch_contract import (
+    extract_adapter_launch_payload,
+    parse_source_inputs,
+    validate_source_paths,
+)
 
 
 def scenario() -> Scenario:
@@ -1401,7 +1405,7 @@ class EvaluationCliTests(unittest.TestCase):
 class ArticleSourcedSessionTests(unittest.TestCase):
     def test_execute_isolated_run_uses_production_sourced_bootstrap(self) -> None:
         captured: list[str] = []
-        source_files_present_during_send: list[bool] = []
+        source_paths_during_send: list[tuple[Path, Path]] = []
 
         class Tutor:
             model = "synthetic-model"
@@ -1412,10 +1416,17 @@ class ArticleSourcedSessionTests(unittest.TestCase):
 
             def send(self, text: str):
                 captured.append(text)
-                source_inputs = parse_source_inputs(text)
-                source_files_present_during_send.append(
-                    Path(str(source_inputs["source_index_path"])).is_file()
-                    and Path(str(source_inputs["source_metadata_path"])).is_file()
+                payload = extract_adapter_launch_payload(
+                    "antigravity",
+                    ["--prompt-interactive", text],
+                    protocol=layout.protocol,
+                )
+                source_inputs = parse_source_inputs(payload)
+                source_paths_during_send.append(
+                    validate_source_paths(
+                        source_inputs,
+                        workspace=layout.records,
+                    )
                 )
                 return TutorTurn("tutor", 1, True)
 
@@ -1470,7 +1481,12 @@ class ArticleSourcedSessionTests(unittest.TestCase):
                 record.source_fixture_sha256,
             )
             bootstrap = captured[0]
-            source_inputs = parse_source_inputs(bootstrap)
+            payload = extract_adapter_launch_payload(
+                "antigravity",
+                ["--prompt-interactive", bootstrap],
+                protocol=layout.protocol,
+            )
+            source_inputs = parse_source_inputs(payload)
             self.assertEqual(scenario.initial_goal, source_inputs["learner_goal"])
             index_path = Path(str(source_inputs["source_index_path"]))
             metadata_path = Path(str(source_inputs["source_metadata_path"]))
@@ -1484,7 +1500,10 @@ class ArticleSourcedSessionTests(unittest.TestCase):
                     (layout.records / "sources").resolve()
                 )
             )
-            self.assertEqual([True], source_files_present_during_send)
+            self.assertEqual(
+                [(index_path, metadata_path)],
+                source_paths_during_send,
+            )
             self.assertFalse(index_path.exists())
             self.assertFalse(metadata_path.exists())
             self.assertIn(
