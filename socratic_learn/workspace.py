@@ -138,6 +138,16 @@ def _prepare_records(records: Path) -> None:
             remediation="check the workspace permissions and retry",
         ) from error
     _require_directory(sessions, "session records")
+    threads = records / "threads"
+    try:
+        threads.mkdir(exist_ok=True)
+    except OSError as error:
+        raise IntegrityError(
+            "thread records directory could not be created",
+            path=threads,
+            remediation="check the workspace permissions and retry",
+        ) from error
+    _require_directory(threads, "thread records")
 
 
 def _prepare_workspace(project: Path) -> LearningWorkspace:
