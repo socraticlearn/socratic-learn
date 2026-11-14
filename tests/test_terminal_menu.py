@@ -6,17 +6,13 @@ import unittest
 from collections.abc import Iterator
 from unittest.mock import Mock
 
+import socratic_learn.terminal_menu as terminal_menu
 from socratic_learn.errors import UsageError
 from socratic_learn.terminal_menu import (
     KeyEvent,
     MenuChoice,
     choose_menu_item,
-    decode_posix_escape_sequence,
-    decode_windows_scan_code,
     format_menu_row,
-    read_posix_menu_key,
-    resolve_posix_menu_key,
-    terminal_display_width,
 )
 
 
@@ -53,6 +49,12 @@ class TerminalMenuTests(unittest.TestCase):
             MenuChoice("bad\r", "Label")
         with self.assertRaisesRegex(UsageError, "control character"):
             MenuChoice("ok", "Label", "detail\x1fhere")
+
+    def test_rejects_unicode_cc_including_c1_csi(self) -> None:
+        with self.assertRaisesRegex(UsageError, "control character"):
+            MenuChoice("ok", "label\u009bCSIn")
+        with self.assertRaisesRegex(UsageError, "control character"):
+            MenuChoice("ok", "Label", "detail\u0080tail")
 
     def test_preserves_unicode_labels_and_details(self) -> None:
         choices = (MenuChoice("jp", "数学", "次の一歩: 証明"),)
@@ -265,8 +267,12 @@ class TerminalMenuTests(unittest.TestCase):
             is_interactive=lambda: True,
             read_key=lambda: next(keys),
         )
-        wide_width = terminal_display_width(format_menu_row(choices[0], selected=True))
-        tiny_width = terminal_display_width(format_menu_row(choices[1], selected=True))
+        wide_width = terminal_menu._terminal_display_width(
+            format_menu_row(choices[0], selected=True)
+        )
+        tiny_width = terminal_menu._terminal_display_width(
+            format_menu_row(choices[1], selected=True)
+        )
         self.assertGreater(wide_width, tiny_width)
         final_row = [part for part in output.getvalue().replace("\r", "\n").split("\n") if part.strip()][
             -1
@@ -357,65 +363,91 @@ class TerminalMenuTests(unittest.TestCase):
         )
 
 
+class PublicApiTests(unittest.TestCase):
+    def test_exports_only_menu_facing_symbols(self) -> None:
+        self.assertEqual(
+            (
+                "KeyEvent",
+                "MenuChoice",
+                "choose_menu_item",
+                "format_menu_row",
+                "read_interactive_key",
+            ),
+            terminal_menu.__all__,
+        )
+
+
 class DisplayWidthTests(unittest.TestCase):
     def test_counts_east_asian_wide_characters(self) -> None:
-        self.assertEqual(4, terminal_display_width("数学"))
-        self.assertGreater(terminal_display_width("> 数学 🎓"), terminal_display_width("> ab"))
+        self.assertEqual(4, terminal_menu._terminal_display_width("数学"))
+        self.assertGreater(
+            terminal_menu._terminal_display_width("> 数学 🎓"),
+            terminal_menu._terminal_display_width("> ab"),
+        )
 
     def test_ignores_combining_and_format_characters(self) -> None:
-        self.assertEqual(1, terminal_display_width("e\u0301"))
-        self.assertEqual(1, terminal_display_width("a\u200d"))
+        self.assertEqual(1, terminal_menu._terminal_display_width("e\u0301"))
+        self.assertEqual(1, terminal_menu._terminal_display_width("a\u200d"))
+
+    def test_conservative_width_for_ambiguous_and_keycap_sequences(self) -> None:
+        self.assertEqual(2, terminal_menu._terminal_display_width("§"))
+        keycap = "1\uFE0F\u20E3"
+        self.assertGreaterEqual(terminal_menu._terminal_display_width(keycap), 2)
+
+    def test_ascii_width_stays_compact(self) -> None:
+        self.assertEqual(len("Tiny"), terminal_menu._terminal_display_width("Tiny"))
+        self.assertEqual(len("> Plain label"), terminal_menu._terminal_display_width("> Plain label"))
 
 
 class NativeKeyParsingTests(unittest.TestCase):
     def test_windows_unknown_scan_code_maps_to_unknown(self) -> None:
-        self.assertEqual(KeyEvent.UNKNOWN, decode_windows_scan_code(75))
+        self.assertEqual(KeyEvent.UNKNOWN, terminal_menu._decode_windows_scan_code(75))
 
     def test_windows_arrow_scan_codes(self) -> None:
-        self.assertEqual(KeyEvent.UP, decode_windows_scan_code(72))
-        self.assertEqual(KeyEvent.DOWN, decode_windows_scan_code(80))
+        self.assertEqual(KeyEvent.UP, terminal_menu._decode_windows_scan_code(72))
+        self.assertEqual(KeyEvent.DOWN, terminal_menu._decode_windows_scan_code(80))
 
     def test_posix_bare_escape_is_unknown(self) -> None:
         self.assertEqual(
             KeyEvent.UNKNOWN,
-            decode_posix_escape_sequence("\x1b", None, None),
+            terminal_menu._decode_posix_escape_sequence("\x1b", None, None),
         )
 
     def test_posix_partial_escape_is_unknown(self) -> None:
         self.assertEqual(
             KeyEvent.UNKNOWN,
-            decode_posix_escape_sequence("\x1b", "[", None),
+            terminal_menu._decode_posix_escape_sequence("\x1b", "[", None),
         )
 
     def test_posix_arrow_sequences(self) -> None:
         self.assertEqual(
             KeyEvent.UP,
-            decode_posix_escape_sequence("\x1b", "[", "A"),
+            terminal_menu._decode_posix_escape_sequence("\x1b", "[", "A"),
         )
         self.assertEqual(
             KeyEvent.DOWN,
-            decode_posix_escape_sequence("\x1b", "[", "B"),
+            terminal_menu._decode_posix_escape_sequence("\x1b", "[", "B"),
         )
 
     def test_posix_unknown_sequence_tail(self) -> None:
         self.assertEqual(
             KeyEvent.UNKNOWN,
-            decode_posix_escape_sequence("\x1b", "[", "C"),
+            terminal_menu._decode_posix_escape_sequence("\x1b", "[", "C"),
         )
 
     def test_posix_resolver_eof_on_missing_first_byte(self) -> None:
-        self.assertEqual(KeyEvent.EOF, resolve_posix_menu_key(None))
+        self.assertEqual(KeyEvent.EOF, terminal_menu._resolve_posix_menu_key(None))
 
     def test_posix_resolver_timeout_after_escape_is_unknown_not_eof(self) -> None:
         self.assertEqual(
             KeyEvent.UNKNOWN,
-            resolve_posix_menu_key("\x1b", second="timeout"),
+            terminal_menu._resolve_posix_menu_key("\x1b", second="timeout"),
         )
 
     def test_posix_resolver_eof_on_continuation_after_escape_is_unknown(self) -> None:
         self.assertEqual(
             KeyEvent.UNKNOWN,
-            resolve_posix_menu_key("\x1b", second="eof"),
+            terminal_menu._resolve_posix_menu_key("\x1b", second="eof"),
         )
 
     def test_posix_first_byte_blocks_without_timed_read(self) -> None:
@@ -423,7 +455,11 @@ class NativeKeyParsingTests(unittest.TestCase):
         blocking = Mock(return_value="\n")
         self.assertEqual(
             KeyEvent.ENTER,
-            read_posix_menu_key(0, read_blocking=blocking, read_timed=timed),
+            terminal_menu._read_posix_menu_key(
+                0,
+                read_blocking=blocking,
+                read_timed=timed,
+            ),
         )
         blocking.assert_called_once()
         timed.assert_not_called()
@@ -433,7 +469,11 @@ class NativeKeyParsingTests(unittest.TestCase):
         blocking = Mock(return_value="\x1b")
         self.assertEqual(
             KeyEvent.UNKNOWN,
-            read_posix_menu_key(0, read_blocking=blocking, read_timed=timed),
+            terminal_menu._read_posix_menu_key(
+                0,
+                read_blocking=blocking,
+                read_timed=timed,
+            ),
         )
         blocking.assert_called_once()
         timed.assert_called_once()

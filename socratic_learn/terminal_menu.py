@@ -16,13 +16,8 @@ __all__ = (
     "KeyEvent",
     "MenuChoice",
     "choose_menu_item",
-    "decode_posix_escape_sequence",
-    "decode_windows_scan_code",
     "format_menu_row",
     "read_interactive_key",
-    "read_posix_menu_key",
-    "resolve_posix_menu_key",
-    "terminal_display_width",
 )
 
 _POSIX_ESCAPE_TIMEOUT_SECONDS = 0.05
@@ -66,23 +61,27 @@ class MenuChoice:
 
 def _reject_control_text(text: str, field: str) -> None:
     for character in text:
-        code = ord(character)
-        if code < 32 or code == 127:
+        if unicodedata.category(character) == "Cc":
             raise UsageError(
                 f"menu choice {field} contains a control character",
-                remediation="remove CR, LF, and other terminal control characters",
+                remediation="remove CR, LF, CSI, and other terminal control characters",
             )
 
 
-def terminal_display_width(text: str) -> int:
-    """Return terminal column width using East Asian and combining-character rules."""
+def _terminal_display_width(text: str) -> int:
+    """Return a conservative terminal column width for interactive row erase."""
     width = 0
     for character in text:
         category = unicodedata.category(character)
-        if category in {"Me", "Mn", "Mc", "Cf"}:
+        if category in {"Mn", "Mc", "Cf"}:
+            continue
+        if category == "Me":
+            width += 2
             continue
         east_asian = unicodedata.east_asian_width(character)
-        if east_asian in {"W", "F"}:
+        if east_asian in {"W", "F", "A"}:
+            width += 2
+        elif category in {"So", "Sk"}:
             width += 2
         else:
             width += 1
@@ -97,7 +96,7 @@ def format_menu_row(choice: MenuChoice, *, selected: bool = False) -> str:
     return f"{marker} {choice.label}"
 
 
-def decode_windows_scan_code(code: int) -> KeyEvent:
+def _decode_windows_scan_code(code: int) -> KeyEvent:
     """Map a Windows extended-key scan code to a normalized event."""
     if code == 72:
         return KeyEvent.UP
@@ -106,7 +105,7 @@ def decode_windows_scan_code(code: int) -> KeyEvent:
     return KeyEvent.UNKNOWN
 
 
-def decode_posix_escape_sequence(
+def _decode_posix_escape_sequence(
     first: str,
     second: str | None,
     third: str | None,
@@ -127,7 +126,7 @@ def decode_posix_escape_sequence(
     return KeyEvent.UNKNOWN
 
 
-def resolve_posix_menu_key(
+def _resolve_posix_menu_key(
     first: str | None,
     second: str | object = _NOT_PROVIDED,
     third: str | object = _NOT_PROVIDED,
@@ -152,7 +151,7 @@ def resolve_posix_menu_key(
         return KeyEvent.UNKNOWN
     if third in {"timeout", "eof"}:
         return KeyEvent.UNKNOWN
-    return decode_posix_escape_sequence("\x1b", "[", str(third))
+    return _decode_posix_escape_sequence("\x1b", "[", str(third))
 
 
 def _validate_choices(choices: Sequence[MenuChoice]) -> None:
@@ -258,7 +257,7 @@ def _redraw_interactive_row(
     *,
     previous_width: int,
 ) -> int:
-    row_width = terminal_display_width(row)
+    row_width = _terminal_display_width(row)
     padding = max(0, previous_width - row_width)
     output.write("\r" + row + (" " * padding))
     output.flush()
@@ -271,7 +270,7 @@ def _finalize_interactive_row(
     *,
     previous_width: int,
 ) -> None:
-    row_width = terminal_display_width(row)
+    row_width = _terminal_display_width(row)
     padding = max(0, previous_width - row_width)
     output.write("\r" + row + (" " * padding) + "\n")
     output.flush()
@@ -314,11 +313,7 @@ def _posix_read_byte_blocking(fd: int) -> str | None:
     return chunk.decode("utf-8", errors="replace")
 
 
-def _posix_read_byte_timed(
-    fd: int,
-    *,
-    timeout_seconds: float,
-) -> str | None | _TimedOut:
+def _posix_read_byte_timed(fd: int, *, timeout_seconds: float) -> object:
     import select
 
     ready, _, _ = select.select([fd], [], [], timeout_seconds)
@@ -330,7 +325,7 @@ def _posix_read_byte_timed(
     return chunk.decode("utf-8", errors="replace")
 
 
-def _continuation_marker(result: str | None | _TimedOut) -> str:
+def _continuation_marker(result: object) -> str:
     if result is _TIMED_OUT:
         return "timeout"
     if result is None:
@@ -338,11 +333,11 @@ def _continuation_marker(result: str | None | _TimedOut) -> str:
     return result
 
 
-def read_posix_menu_key(
+def _read_posix_menu_key(
     fd: int,
     *,
     read_blocking: Callable[[int], str | None] | None = None,
-    read_timed: Callable[[int, float], str | None | _TimedOut] | None = None,
+    read_timed: Callable[[int, float], object] | None = None,
 ) -> KeyEvent:
     """Read one POSIX menu key; first byte blocks, escape continuations time out."""
     blocking = read_blocking or _posix_read_byte_blocking
@@ -354,18 +349,18 @@ def read_posix_menu_key(
     )
     first = blocking(fd)
     if first is None:
-        return resolve_posix_menu_key(None)
+        return _resolve_posix_menu_key(None)
     if first != "\x1b":
-        return resolve_posix_menu_key(first)
+        return _resolve_posix_menu_key(first)
     second = timed(fd, _POSIX_ESCAPE_TIMEOUT_SECONDS)
     if not isinstance(second, str):
-        return resolve_posix_menu_key("\x1b", second=_continuation_marker(second))
+        return _resolve_posix_menu_key("\x1b", second=_continuation_marker(second))
     if second != "[":
-        return resolve_posix_menu_key("\x1b", second=second)
+        return _resolve_posix_menu_key("\x1b", second=second)
     third = timed(fd, _POSIX_ESCAPE_TIMEOUT_SECONDS)
     if not isinstance(third, str):
-        return resolve_posix_menu_key("\x1b", second="[", third=_continuation_marker(third))
-    return resolve_posix_menu_key("\x1b", second="[", third=third)
+        return _resolve_posix_menu_key("\x1b", second="[", third=_continuation_marker(third))
+    return _resolve_posix_menu_key("\x1b", second="[", third=third)
 
 
 def read_interactive_key() -> KeyEvent:
@@ -384,7 +379,7 @@ def read_interactive_key() -> KeyEvent:
             second = msvcrt.getwch()
             if second == "":
                 return KeyEvent.EOF
-            return decode_windows_scan_code(ord(second))
+            return _decode_windows_scan_code(ord(second))
         return KeyEvent.UNKNOWN
 
     import termios
@@ -394,7 +389,7 @@ def read_interactive_key() -> KeyEvent:
     previous = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
-        return read_posix_menu_key(fd)
+        return _read_posix_menu_key(fd)
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, previous)
 
