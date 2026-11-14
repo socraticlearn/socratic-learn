@@ -255,48 +255,178 @@ README_LAUNCHER_REQUIREMENTS = (
     "pi, claude code, and antigravity",
     "cursor remains a project integration",
 )
-SESSION_PROTOCOL_PORTABLE_CLAUSES = (
-    "when the launcher supplies a checkpoint path, write exactly one valid session record to that path at close",
-    "after the learner confirms the outcome, set the title in the heading to",
-    "<subject>: <specific focus>",
-    "when session control marks `prior_complete_encounter_role` as `prior_evidence_only`",
-    "or sets `must_reestablish_current_state` after an interrupted launch",
-    "cannot establish current demonstrated state until the learner completes that retrieval successfully",
-    "do not treat an interrupted launch or a session that ended without a valid checkpoint as demonstrated evidence",
-    "keep index paths, chunk paths, file-reading operations, protocol labels, checkpoint paths, session control payloads, encounter paths, and thread storage private",
+SESSION_PROTOCOL_RESUME_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "prior evidence only",
+        re.compile(r"prior_evidence_only", re.IGNORECASE),
+    ),
+    (
+        "must reestablish state",
+        re.compile(r"must_reestablish_current_state", re.IGNORECASE),
+    ),
+    (
+        "interrupted not demonstrated",
+        re.compile(
+            r"do not treat an interrupted launch.{0,160}demonstrated evidence",
+            re.DOTALL | re.IGNORECASE,
+        ),
+    ),
+    (
+        "retrieval before current state",
+        re.compile(
+            r"cannot establish current demonstrated state.{0,240}retrieval",
+            re.DOTALL | re.IGNORECASE,
+        ),
+    ),
 )
-README_PORTABLE_SESSION_CLAUSES = (
-    "new session",
-    "view all",
-    "arrow keys",
-    "numbered list",
-    "socratic read",
-    "builds session control in memory",
-    "only thread metadata and structured checkpoint files persist",
-    "host chat logs are not used as session memory",
-    "immutable",
-    "incomplete",
-    "provider ids",
+SESSION_PROTOCOL_CLOSE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "checkpoint close",
+        re.compile(
+            r"checkpoint path.{0,120}exactly one.{0,80}valid session record.{0,60}at close",
+            re.DOTALL,
+        ),
+    ),
+    (
+        "subject focus title",
+        re.compile(r"<subject>: <specific focus>", re.IGNORECASE),
+    ),
 )
-LAUNCHER_SESSION_CONTROL_CLAUSES = (
-    "`checkpoint_path`",
-    "`session_record_contract`",
-    "`heading_pattern`",
-    "`section_headings`",
-    "`prior_complete_encounter_path`",
-    "`prior_complete_encounter_role`",
-    "`must_reestablish_current_state`",
-    "host-independent",
-    "structured session summaries",
-    "not provider chat history",
-    "--- socratic learn session control (json) ---",
-    "--- socratic learn launch ---",
+SESSION_PROTOCOL_CONVERSATION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "orchestration privacy",
+        re.compile(r"checkpoint paths.{0,120}session control", re.DOTALL),
+    ),
 )
-MANIFEST_REFERENCE_VERSION_CLAUSES = (
-    "`conformance.version` is integer `5`",
-    "`protocol_version`: exact protocol version `1.3.0`",
-    "require the exact current `conformance.version`",
-    "not silently treated as current",
+SESSION_PROTOCOL_PORTABLE_PATTERNS = (
+    *SESSION_PROTOCOL_RESUME_PATTERNS,
+    *SESSION_PROTOCOL_CLOSE_PATTERNS,
+    *SESSION_PROTOCOL_CONVERSATION_PATTERNS,
+)
+README_PORTABLE_SESSION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("menu new session", re.compile(r"\bnew session\b", re.IGNORECASE)),
+    (
+        "five recent saved entries",
+        re.compile(r"five most recent saved", re.IGNORECASE),
+    ),
+    (
+        "legacy session import",
+        re.compile(
+            r"legacy session record.{0,160}(import|choosing|selected)",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ),
+    ("view all", re.compile(r"view all", re.IGNORECASE)),
+    (
+        "menu navigation",
+        re.compile(r"(arrow keys|numbered list)", re.IGNORECASE),
+    ),
+    (
+        "socratic read bypass",
+        re.compile(r"socratic read.{0,100}(skip|bypass|chooser)", re.IGNORECASE),
+    ),
+    (
+        "transient session control",
+        re.compile(
+            r"(transient session[- ]control|session[- ]control.{0,80}"
+            r"(memory|does not persist|not persist))",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ),
+    (
+        "thread metadata and checkpoints persist",
+        re.compile(
+            r"(thread metadata|checkpoint).{0,120}persist",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ),
+    (
+        "workspace not only thread files",
+        re.compile(
+            r"(other private learner|along with other|also in the workspace)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "host chat exclusion",
+        re.compile(r"host chat logs are not used", re.IGNORECASE),
+    ),
+    ("incomplete thread", re.compile(r"\bincomplete\b", re.IGNORECASE)),
+    ("provider ids privacy", re.compile(r"provider ids", re.IGNORECASE)),
+)
+LAUNCHER_SESSION_CONTROL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("checkpoint path", re.compile(r"`checkpoint_path`", re.IGNORECASE)),
+    (
+        "session record contract",
+        re.compile(r"`session_record_contract`", re.IGNORECASE),
+    ),
+    ("heading pattern", re.compile(r"`heading_pattern`", re.IGNORECASE)),
+    ("section headings", re.compile(r"`section_headings`", re.IGNORECASE)),
+    (
+        "prior encounter path",
+        re.compile(r"`prior_complete_encounter_path`", re.IGNORECASE),
+    ),
+    (
+        "prior encounter role",
+        re.compile(r"`prior_complete_encounter_role`", re.IGNORECASE),
+    ),
+    (
+        "must reestablish",
+        re.compile(r"`must_reestablish_current_state`", re.IGNORECASE),
+    ),
+    ("host independent resume", re.compile(r"host[- ]independent", re.IGNORECASE)),
+    (
+        "structured summaries",
+        re.compile(r"structured session summaries", re.IGNORECASE),
+    ),
+    (
+        "not provider chat",
+        re.compile(r"not provider chat history", re.IGNORECASE),
+    ),
+    (
+        "session control delimiter",
+        re.compile(
+            r"--- socratic learn session control \(json\) ---",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "launch delimiter",
+        re.compile(r"--- socratic learn launch ---", re.IGNORECASE),
+    ),
+)
+MANIFEST_REFERENCE_TOP_LEVEL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "protocol version",
+        re.compile(
+            r"`protocol_version`: exact protocol version `1\.3\.0`",
+            re.IGNORECASE,
+        ),
+    ),
+)
+MANIFEST_REFERENCE_CONFORMANCE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "conformance version",
+        re.compile(r"`conformance\.version` is integer `5`", re.IGNORECASE),
+    ),
+)
+MANIFEST_REFERENCE_VERSION_POLICY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "exact conformance requirement",
+        re.compile(
+            r"require the exact current `conformance\.version`",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "older not current",
+        re.compile(r"not silently treated as current", re.IGNORECASE),
+    ),
+)
+MANIFEST_REFERENCE_VERSION_PATTERNS = (
+    *MANIFEST_REFERENCE_TOP_LEVEL_PATTERNS,
+    *MANIFEST_REFERENCE_CONFORMANCE_PATTERNS,
+    *MANIFEST_REFERENCE_VERSION_POLICY_PATTERNS,
 )
 NATIVE_RELEASE_CAVEAT = (
     "native installation is available only after github release v0.1.0 "
@@ -469,6 +599,135 @@ def parse_frontmatter(text: str) -> dict[str, str] | None:
 
 def normalize(text: str) -> str:
     return " ".join(text.split())
+
+
+def markdown_section(text: str, heading: str, *, until: str | None = None) -> str:
+    marker = f"## {heading}"
+    if marker not in text:
+        return ""
+    body = text.split(marker, 1)[1]
+    if until is not None:
+        end = body.find(f"## {until}")
+        if end >= 0:
+            body = body[:end]
+    return body
+
+
+def readme_portable_session_section(readme_text: str) -> str:
+    return markdown_section(
+        readme_text,
+        "Quick start",
+        until="Choose an AI host",
+    )
+
+
+def check_document_patterns(
+    text: str,
+    patterns: tuple[tuple[str, re.Pattern[str]], ...],
+) -> list[str]:
+    subject = normalize(text)
+    return [
+        name
+        for name, pattern in patterns
+        if pattern.search(subject) is None
+    ]
+
+
+def mutate_once(text: str, old: str, new: str) -> str:
+    count = text.count(old)
+    if count != 1:
+        raise ValueError(
+            f"expected exactly one mutation target, found {count}"
+        )
+    return text.replace(old, new, 1)
+
+
+def portable_documentation_errors(root: Path) -> list[str]:
+    errors: list[str] = []
+
+    session_protocol = root / "core/session-protocol.md"
+    if session_protocol.is_file():
+        protocol_text = session_protocol.read_text(encoding="utf-8")
+        sections = (
+            (
+                markdown_section(
+                    protocol_text,
+                    "Resume and time bounds",
+                    until="Natural learner-facing conversation",
+                ),
+                SESSION_PROTOCOL_RESUME_PATTERNS,
+            ),
+            (
+                markdown_section(
+                    protocol_text,
+                    "Natural learner-facing conversation",
+                    until="Source study",
+                ),
+                SESSION_PROTOCOL_CONVERSATION_PATTERNS,
+            ),
+            (
+                protocol_text.split("## 5. Close and persist", 1)[-1].split(
+                    "## Capability fallbacks",
+                    1,
+                )[0]
+                + markdown_section(protocol_text, "Session record contract"),
+                SESSION_PROTOCOL_CLOSE_PATTERNS,
+            ),
+        )
+        if any(check_document_patterns(text, patterns) for text, patterns in sections):
+            errors.append(
+                "core/session-protocol.md is missing launcher checkpoint contracts"
+            )
+
+    readme = root / "README.md"
+    if readme.is_file():
+        section = readme_portable_session_section(
+            readme.read_text(encoding="utf-8")
+        )
+        if check_document_patterns(section, README_PORTABLE_SESSION_PATTERNS):
+            errors.append("README.md is missing portable session memory guidance")
+
+    manifest_reference = root / "docs/manifest-reference.md"
+    if manifest_reference.is_file():
+        manifest_text = manifest_reference.read_text(encoding="utf-8")
+        top_level = manifest_text.split("## Top-level fields", 1)[-1].split(
+            "## Source records",
+            1,
+        )[0]
+        conformance_section = markdown_section(
+            manifest_text,
+            "Conformance and session fields",
+            until="Version policy",
+        )
+        version_policy = markdown_section(manifest_text, "Version policy")
+        missing_manifest = (
+            check_document_patterns(top_level, MANIFEST_REFERENCE_TOP_LEVEL_PATTERNS)
+            + check_document_patterns(
+                conformance_section,
+                MANIFEST_REFERENCE_CONFORMANCE_PATTERNS,
+            )
+            + check_document_patterns(
+                version_policy,
+                MANIFEST_REFERENCE_VERSION_POLICY_PATTERNS,
+            )
+        )
+        if missing_manifest:
+            errors.append(
+                "docs/manifest-reference.md is missing current version policy"
+            )
+
+    launcher_adapters = root / "docs/launcher-adapters.md"
+    if launcher_adapters.is_file():
+        launcher_text = launcher_adapters.read_text(encoding="utf-8")
+        if check_document_patterns(
+            launcher_text,
+            LAUNCHER_SESSION_CONTROL_PATTERNS,
+        ):
+            errors.append(
+                "docs/launcher-adapters.md is missing session control contracts"
+            )
+
+    return errors
 
 
 def _opening_visible_markdown(text: str) -> str:
@@ -1459,9 +1718,6 @@ def validate(root: Path) -> list[str]:
             if len(quick_start) == 2
             else ""
         )
-        normalized_quick = normalize(quick_start_text).lower()
-        if not all(clause in normalized_quick for clause in README_PORTABLE_SESSION_CLAUSES):
-            errors.append("README.md is missing portable session memory guidance")
         order_positions = [
             quick_start_text.lower().find(marker)
             for marker in README_ONBOARDING_ORDER
@@ -1529,28 +1785,6 @@ def validate(root: Path) -> list[str]:
                 f"{relative} contains unsafe or mutable installer instructions"
             )
 
-    session_protocol = root / "core/session-protocol.md"
-    if session_protocol.is_file():
-        protocol_text = normalize(
-            session_protocol.read_text(encoding="utf-8")
-        ).lower()
-        if not all(clause in protocol_text for clause in SESSION_PROTOCOL_PORTABLE_CLAUSES):
-            errors.append(
-                "core/session-protocol.md is missing launcher checkpoint contracts"
-            )
-
-    manifest_reference = root / "docs/manifest-reference.md"
-    if manifest_reference.is_file():
-        manifest_text = normalize(
-            manifest_reference.read_text(encoding="utf-8")
-        ).lower()
-        if not all(
-            clause in manifest_text for clause in MANIFEST_REFERENCE_VERSION_CLAUSES
-        ):
-            errors.append(
-                "docs/manifest-reference.md is missing current version policy"
-            )
-
     launcher_adapters = root / "docs/launcher-adapters.md"
     if launcher_adapters.is_file():
         launcher_text = normalize(
@@ -1563,12 +1797,8 @@ def validate(root: Path) -> list[str]:
             errors.append(
                 "docs/launcher-adapters.md is missing launcher adapter contracts"
             )
-        if not all(
-            clause in launcher_text for clause in LAUNCHER_SESSION_CONTROL_CLAUSES
-        ):
-            errors.append(
-                "docs/launcher-adapters.md is missing session control contracts"
-            )
+
+    errors.extend(portable_documentation_errors(root))
 
     legacy_package = root / "learning_tutor"
     allowed_legacy_modules = {"__init__.py", "__main__.py"}

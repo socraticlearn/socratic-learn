@@ -114,22 +114,21 @@ socratic --here
 ```
 
 Running `socratic` with no arguments opens a small menu: **New session**, your
-five most recent threads, and **View all** when you have more saved progress. On
-a capable terminal, move with the arrow keys and press Enter; otherwise pick
-from the numbered list. Supply a goal on the command line, or run `socratic read`
-with a source, to skip the menu entirely.
+five most recent saved entries, and **View all** when you have more saved
+progress. The list can mix learning threads and legacy session records; choosing
+a legacy record imports it into thread storage without removing the original
+file. On a capable terminal, move with the arrow keys and press Enter; otherwise
+pick from the numbered list. Supply a goal on the command line, or run
+`socratic read` with a source, to skip the menu entirely.
 
-Saved menu entries are learning threads. Each thread keeps prior encounters
-immutable once written. You can resume on Pi, Claude Code, or Antigravity from
-structured summaries stored locally. Host chat logs are not used as session memory.
-If a launch ends before a valid checkpoint is written, the thread stays
-incomplete. Older summaries may guide the first retrieval question, but they do
-not count as fresh evidence until you demonstrate the idea again.
+You can resume on Pi, Claude Code, or Antigravity from structured summaries and
+checkpoints in your private workspace. Host chat logs are not used as session memory.
+Completed encounters in a thread stay immutable once written. If a
+launch ends before a valid checkpoint is written, the thread stays incomplete.
+Older summaries may guide the first retrieval question, but they do not count as
+fresh evidence until you demonstrate the idea again.
 
-The launcher builds session control in memory for the host process. Only thread
-metadata and structured checkpoint files persist on disk under your personal
-workspace or a `--here` project. Launcher-owned storage does not keep raw host
-transcripts, provider credentials, or provider ids.
+The launcher assembles a transient session-control payload in memory for the host process and does not persist that JSON on disk. Thread metadata and structured checkpoint files do persist, along with other private learner records already in the workspace. Launcher-owned storage does not keep raw host transcripts, provider credentials, or provider ids.
 
 ## Choose an AI host
 

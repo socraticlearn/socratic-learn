@@ -13,14 +13,22 @@ from unittest.mock import patch
 
 from socratic_learn.conformance import CONFORMANCE_CONTRACT_VERSION
 from tests.validate_repository import (
-    LAUNCHER_SESSION_CONTROL_CLAUSES,
-    MANIFEST_REFERENCE_VERSION_CLAUSES,
-    README_PORTABLE_SESSION_CLAUSES,
+    LAUNCHER_SESSION_CONTROL_PATTERNS,
+    MANIFEST_REFERENCE_CONFORMANCE_PATTERNS,
+    MANIFEST_REFERENCE_TOP_LEVEL_PATTERNS,
+    MANIFEST_REFERENCE_VERSION_PATTERNS,
+    MANIFEST_REFERENCE_VERSION_POLICY_PATTERNS,
+    README_PORTABLE_SESSION_PATTERNS,
     RUNTIME_PDF_DEPENDENCY,
-    SESSION_PROTOCOL_PORTABLE_CLAUSES,
+    SESSION_PROTOCOL_PORTABLE_PATTERNS,
     UNSAFE_INSTALLER_PATTERNS,
+    check_document_patterns,
     main,
+    markdown_section,
+    mutate_once,
     normalize,
+    portable_documentation_errors,
+    readme_portable_session_section,
     readme_opening_prose_paragraph,
     semantic_runtime_errors,
     validate,
@@ -465,9 +473,8 @@ class RepositoryValidationTests(unittest.TestCase):
             (root / "docs/manifest-reference.md").read_text(encoding="utf-8")
         ).lower()
 
-        for clause in MANIFEST_REFERENCE_VERSION_CLAUSES:
-            with self.subTest(clause=clause):
-                self.assertIn(clause, text)
+        missing = check_document_patterns(text, MANIFEST_REFERENCE_VERSION_PATTERNS)
+        self.assertEqual([], missing, msg=f"missing patterns: {missing}")
         for clause in (
             "silent orchestration",
             "launcher-checkpoint-close",
@@ -3471,66 +3478,92 @@ class RepositoryValidationTests(unittest.TestCase):
 
 
 class PortableSessionMemoryDocumentationTests(unittest.TestCase):
-    def test_session_protocol_documents_launcher_checkpoint_clauses(self) -> None:
+    def test_session_protocol_matches_portable_patterns(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        text = normalize(
-            (root / "core/session-protocol.md").read_text(encoding="utf-8")
-        ).lower()
-        for clause in SESSION_PROTOCOL_PORTABLE_CLAUSES:
-            with self.subTest(clause=clause):
-                self.assertIn(clause, text)
+        protocol_text = (root / "core/session-protocol.md").read_text(
+            encoding="utf-8"
+        )
+        sections = (
+            markdown_section(
+                protocol_text,
+                "Resume and time bounds",
+                until="Natural learner-facing conversation",
+            ),
+            markdown_section(
+                protocol_text,
+                "Natural learner-facing conversation",
+                until="Source study",
+            ),
+            protocol_text.split("## 5. Close and persist", 1)[-1].split(
+                "## Capability fallbacks",
+                1,
+            )[0]
+            + markdown_section(protocol_text, "Session record contract"),
+        )
+        combined = "\n".join(sections)
+        missing = check_document_patterns(
+            combined,
+            SESSION_PROTOCOL_PORTABLE_PATTERNS,
+        )
+        self.assertEqual([], missing, msg=f"missing patterns: {missing}")
 
-    def test_readme_quick_start_documents_portable_session_clauses(self) -> None:
+    def test_readme_quick_start_matches_portable_patterns(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        readme = (root / "README.md").read_text(encoding="utf-8")
-        quick_start = readme.split("## Quick start", 1)[1].split(
-            "## Choose an AI host", 1
+        section = readme_portable_session_section(
+            (root / "README.md").read_text(encoding="utf-8")
+        )
+        missing = check_document_patterns(section, README_PORTABLE_SESSION_PATTERNS)
+        self.assertEqual([], missing, msg=f"missing patterns: {missing}")
+
+    def test_launcher_adapters_match_session_control_patterns(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        text = (root / "docs/launcher-adapters.md").read_text(encoding="utf-8")
+        missing = check_document_patterns(text, LAUNCHER_SESSION_CONTROL_PATTERNS)
+        self.assertEqual([], missing, msg=f"missing patterns: {missing}")
+
+    def test_manifest_reference_matches_version_patterns(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        manifest_text = (root / "docs/manifest-reference.md").read_text(
+            encoding="utf-8"
+        )
+        top_level = manifest_text.split("## Top-level fields", 1)[-1].split(
+            "## Source records",
+            1,
         )[0]
-        text = normalize(quick_start).lower()
-        for clause in README_PORTABLE_SESSION_CLAUSES:
-            with self.subTest(clause=clause):
-                self.assertIn(clause, text)
-
-    def test_launcher_adapters_document_session_control_clauses(self) -> None:
-        root = Path(__file__).resolve().parents[1]
-        text = normalize(
-            (root / "docs/launcher-adapters.md").read_text(encoding="utf-8")
-        ).lower()
-        for clause in LAUNCHER_SESSION_CONTROL_CLAUSES:
-            with self.subTest(clause=clause):
-                self.assertIn(clause, text)
-
-    def test_manifest_reference_requires_exact_conformance_version(self) -> None:
-        root = Path(__file__).resolve().parents[1]
-        text = normalize(
-            (root / "docs/manifest-reference.md").read_text(encoding="utf-8")
-        ).lower()
-        for clause in MANIFEST_REFERENCE_VERSION_CLAUSES:
-            with self.subTest(clause=clause):
-                self.assertIn(clause, text)
-        self.assertIn(f"integer `{CONFORMANCE_CONTRACT_VERSION}`", text)
+        conformance_section = markdown_section(
+            manifest_text,
+            "Conformance and session fields",
+            until="Version policy",
+        )
+        version_policy = markdown_section(manifest_text, "Version policy")
+        missing = (
+            check_document_patterns(top_level, MANIFEST_REFERENCE_TOP_LEVEL_PATTERNS)
+            + check_document_patterns(
+                conformance_section,
+                MANIFEST_REFERENCE_CONFORMANCE_PATTERNS,
+            )
+            + check_document_patterns(
+                version_policy,
+                MANIFEST_REFERENCE_VERSION_POLICY_PATTERNS,
+            )
+        )
+        self.assertEqual([], missing, msg=f"missing patterns: {missing}")
+        self.assertIn(f"integer `{CONFORMANCE_CONTRACT_VERSION}`", manifest_text)
 
     def test_repository_validator_enforces_portable_session_contracts(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        errors = validate(root)
-        blocking = [
-            error
-            for error in errors
-            if "launcher checkpoint" in error
-            or "portable session memory" in error
-            or "session control contracts" in error
-            or "version policy" in error
-        ]
-        self.assertEqual([], blocking)
+        self.assertEqual([], portable_documentation_errors(root))
 
     def test_validator_rejects_provider_chat_resume_claim(self) -> None:
         temp, root = RepositoryValidationTests.make_root(self)
         self.addCleanup(temp.cleanup)
         readme = root / "README.md"
         text = readme.read_text(encoding="utf-8")
+        target = "Host chat logs are not used as session memory."
         readme.write_text(
-            text.replace(
-                "Host chat logs are not used as session memory.",
+            mutate_once(
+                text,
+                target,
                 "Host chat logs are used as session memory.",
             ),
             encoding="utf-8",
@@ -3545,10 +3578,16 @@ class PortableSessionMemoryDocumentationTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         readme = root / "README.md"
         text = readme.read_text(encoding="utf-8")
+        target = (
+            "assembles a transient session-control payload in memory for the host "
+            "process and does not persist that JSON on disk."
+        )
         readme.write_text(
-            text.replace(
-                "builds session control in memory",
-                "persists session control on disk",
+            mutate_once(
+                text,
+                target,
+                "assembles a persistent session-control payload on disk for the host "
+                "process and persists that JSON on disk.",
             ),
             encoding="utf-8",
         )
@@ -3562,10 +3601,14 @@ class PortableSessionMemoryDocumentationTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         protocol = root / "core/session-protocol.md"
         text = protocol.read_text(encoding="utf-8")
+        target = (
+            "Do not treat an interrupted launch or a session that ended without a\n"
+            "valid checkpoint as demonstrated evidence."
+        )
         protocol.write_text(
-            text.replace(
-                "Do not treat an interrupted launch or a session that ended without a\n"
-                "valid checkpoint as demonstrated evidence.",
+            mutate_once(
+                text,
+                target,
                 "Treat an interrupted launch as demonstrated evidence when a prior summary exists.",
             ),
             encoding="utf-8",
@@ -3574,6 +3617,10 @@ class PortableSessionMemoryDocumentationTests(unittest.TestCase):
             "core/session-protocol.md is missing launcher checkpoint contracts",
             validate(root),
         )
+
+    def test_mutate_once_rejects_ambiguous_targets(self) -> None:
+        with self.assertRaises(ValueError):
+            mutate_once("alpha alpha", "alpha", "beta")
 
 
 if __name__ == "__main__":
