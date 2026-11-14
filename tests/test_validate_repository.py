@@ -2078,7 +2078,7 @@ class RepositoryValidationTests(unittest.TestCase):
             "if: github.event_name == 'push' && "
             "startsWith(github.ref, 'refs/tags/v')"
         )
-        self.assertEqual(3, release.count(publish_gate))
+        self.assertEqual(4, release.count(publish_gate))
         pypi = release.split("  publish-pypi:", 1)[1].split(
             "  publish-npm:", 1
         )[0]
@@ -3788,6 +3788,7 @@ class SynchronizedRegistryReleaseTests(unittest.TestCase):
             "publish-github:",
             "publish-pypi:",
             "publish-npm:",
+            "verify-registry:",
         ):
             with self.subTest(job=job):
                 self.assertIn(f"  {job}", release)
@@ -3852,7 +3853,7 @@ class SynchronizedRegistryReleaseTests(unittest.TestCase):
             "if: github.event_name == 'push' && "
             "startsWith(github.ref, 'refs/tags/v')"
         )
-        self.assertEqual(3, release.count(publish_gate))
+        self.assertEqual(4, release.count(publish_gate))
         pypi = release.split("  publish-pypi:", 1)[1].split("  publish-npm:", 1)[0]
         npm = release.split("  publish-npm:", 1)[1]
         for job in (pypi, npm):
@@ -4003,6 +4004,60 @@ class SynchronizedRegistryReleaseTests(unittest.TestCase):
         )
         self.assertIn(
             "npm publishing must consume the npm-package artifact only",
+            validate(root),
+        )
+
+    def test_verify_registry_job_matrix_and_dependencies(self) -> None:
+        release = self.release
+        self.assertIn("  verify-registry:", release)
+        job = release.split("  verify-registry:", 1)[1]
+        head = job.split("steps:", 1)[0]
+        self.assertIn("publish-pypi", head)
+        self.assertIn("publish-npm", head)
+        self.assertIn("matrix:", head)
+        for runner in ("windows-latest", "ubuntu-latest", "macos-latest"):
+            with self.subTest(runner=runner):
+                self.assertIn(runner, head)
+        body = job.split("steps:", 1)[1]
+        for marker in (
+            'python-version: "3.11"',
+            "pipx",
+            'node-version: "24"',
+            "package-manager-cache: false",
+            "tests.registry_smoke",
+            "GITHUB_REF_NAME",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, body)
+        self.assertNotIn("from socratic_learn import", body)
+        self.assertNotIn("sys.path.insert", body)
+
+    def test_validator_rejects_missing_verify_registry_job(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        release = root / ".github/workflows/release.yml"
+        release.write_text(
+            release.read_text(encoding="utf-8").replace("  verify-registry:", "  verify-registry-disabled:", 1),
+            encoding="utf-8",
+        )
+        self.assertIn(
+            "Release workflow must verify published registry packages",
+            validate(root),
+        )
+
+    def test_validator_rejects_verify_registry_without_publish_needs(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        release = root / ".github/workflows/release.yml"
+        text = release.read_text(encoding="utf-8")
+        text = text.replace(
+            "needs:\n      - publish-pypi\n      - publish-npm",
+            "needs: publish-pypi",
+            1,
+        )
+        release.write_text(text, encoding="utf-8")
+        self.assertIn(
+            "Registry verification must wait for both registry publish jobs",
             validate(root),
         )
 

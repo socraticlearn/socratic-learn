@@ -218,3 +218,37 @@ jobs:
         run: npm config set registry https://registry.npmjs.org
       - name: Publish @socraticlearn/cli to npm
         run: npm publish npm-dist/*.tgz --access public
+
+  verify-registry:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - publish-pypi
+      - publish-npm
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pipx
+        run: python -m pip install --upgrade pip pipx
+      - name: Ensure pipx path
+        run: python -m pipx ensurepath
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Use npm trusted publishing floor
+        run: npm install -g "npm@>=11.5.1"
+      - name: Verify published registry packages
+        shell: python
+        run: |
+          import os
+
+          version = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          from tests.registry_smoke import run_registry_smoke
+
+          run_registry_smoke(version)

@@ -1744,6 +1744,65 @@ def validate_release_automation(root: Path) -> list[str]:
         else:
             errors.append("Release workflow must include a publish-npm job")
 
+        verify_registry = workflow_job(release, "verify-registry")
+        if not verify_registry:
+            errors.append(
+                "Release workflow must verify published registry packages"
+            )
+        else:
+            if publish_gate not in verify_registry.split("steps:", 1)[0]:
+                errors.append(
+                    "Registry verification must require a push event and version tag"
+                )
+            verify_needs = workflow_job_needs(verify_registry)
+            if verify_needs != ["publish-pypi", "publish-npm"]:
+                errors.append(
+                    "Registry verification must wait for both registry publish jobs"
+                )
+            matrix_section = verify_registry.split("strategy:", 1)
+            if len(matrix_section) < 2:
+                errors.append(
+                    "Registry verification must use a multi-platform matrix"
+                )
+            else:
+                matrix = matrix_section[1].split("steps:", 1)[0]
+                for runner in (
+                    "windows-latest",
+                    "ubuntu-latest",
+                    "macos-latest",
+                ):
+                    if runner not in matrix:
+                        errors.append(
+                            "Registry verification must run on clean "
+                            f"{runner} runners"
+                        )
+                        break
+            for marker in (
+                'python-version: "3.11"',
+                "pipx",
+                'node-version: "24"',
+                "package-manager-cache: false",
+                "tests.registry_smoke",
+                "GITHUB_REF_NAME",
+            ):
+                if marker not in verify_registry:
+                    errors.append(
+                        "Registry verification is missing required tooling or helper"
+                    )
+                    break
+            if "from socratic_learn import" in verify_registry:
+                errors.append(
+                    "Registry verification must not import the checkout package"
+                )
+            if "sys.path.insert" in verify_registry:
+                errors.append(
+                    "Registry verification must not add the checkout to sys.path"
+                )
+            if "run_registry_smoke" not in verify_registry:
+                errors.append(
+                    "Registry verification must invoke the registry smoke helper"
+                )
+
         pypi_needs = workflow_job_needs(pypi_publish)
         if pypi_needs and pypi_needs != ["publish-github"]:
             errors.append(
