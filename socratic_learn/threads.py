@@ -10,11 +10,11 @@ from .thread_schema import (
     ThreadRecord,
     ThreadSummary,
 )
+from .thread_paths import ensure_threads_root
 from .thread_storage import (
     create_pending_encounter,
     create_thread,
     discover_legacy_sessions,
-    ensure_threads_root,
     finalize_thread_encounter,
     import_legacy_session,
     list_threads,

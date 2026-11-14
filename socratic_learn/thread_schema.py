@@ -78,8 +78,8 @@ def utc_now_timestamp() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-def parse_utc_timestamp(value: str, *, path: Path | None = None, field: str = "timestamp") -> datetime:
-    if not value:
+def parse_utc_timestamp(value: object, *, path: Path | None = None, field: str = "timestamp") -> datetime:
+    if type(value) is not str or not value:
         raise integrity(f"thread metadata has an invalid {field}", path=path)
     normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
     try:

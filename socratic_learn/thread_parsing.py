@@ -40,11 +40,19 @@ def _ordered_section_map(text: str) -> dict[str, str]:
     if session_date != heading_match.group(1):
         raise integrity("session record heading is not valid")
 
+    index = 1
+    while index < len(lines) and not lines[index].startswith("## "):
+        if lines[index].strip():
+            raise integrity("session record has unexpected content before required headings")
+        index += 1
+    if index >= len(lines):
+        raise integrity("session record is missing required headings")
+
     sections: dict[str, list[str]] = {}
     expected_index = 0
     current: str | None = None
 
-    for line in lines[1:]:
+    for line in lines[index:]:
         if line.startswith("## "):
             if line in sections:
                 raise integrity("session record has duplicate headings")

@@ -16,6 +16,15 @@ from .thread_parsing import (
     parse_session_record,
     validate_legacy_session_content,
 )
+from .thread_paths import (
+    ensure_threads_root,
+    require_legacy_within_records,
+    require_records_root,
+    require_thread_workspace,
+    require_threads_root,
+    resolve_pending_child,
+    validate_storage_ancestry,
+)
 from .thread_schema import (
     LegacySessionSummary,
     ThreadRecord,
@@ -27,37 +36,24 @@ from .thread_schema import (
     parse_utc_timestamp,
     record_to_document,
     utc_now_timestamp,
-    validate_canonical_thread_id,
     validate_safe_filename,
 )
 
 _THREAD_FILENAME = "thread.json"
 _SESSIONS_DIRNAME = "sessions"
-_LEGACY_SESSIONS_DIRNAME = "sessions"
 _PENDING_PREFIX = "pending-"
 
 
 def threads_root(records: Path) -> Path:
-    return records / "threads"
-
-
-def _reject_symlink(path: Path, description: str) -> None:
-    if path.is_symlink():
-        raise integrity(f"{description} must not be a symbolic link", path=path)
-
-
-def _require_directory(path: Path, description: str) -> Path:
-    _reject_symlink(path, description)
-    try:
-        if not path.is_dir():
-            raise integrity(f"{description} is not a directory", path=path)
-        return path.resolve()
-    except OSError as error:
-        raise integrity(f"{description} could not be inspected", path=path) from error
+    return require_records_root(records) / "threads"
 
 
 def _require_regular_file(path: Path, description: str) -> None:
-    _reject_symlink(path, description)
+    try:
+        if path.is_symlink():
+            raise integrity(f"{description} must not be a symbolic link", path=path)
+    except OSError as error:
+        raise integrity(f"{description} could not be inspected", path=path) from error
     try:
         status = path.stat(follow_symlinks=False)
     except OSError as error:
@@ -73,27 +69,19 @@ def _remove_tree(path: Path) -> None:
         raise integrity("partial thread directory could not be removed", path=path) from error
 
 
-def ensure_threads_root(records: Path) -> Path:
-    root = threads_root(records)
-    if root.exists() or root.is_symlink():
-        return _require_directory(root, "thread records")
-    try:
-        root.mkdir(parents=True)
-    except OSError as error:
-        raise integrity("thread records directory could not be created", path=root) from error
-    return _require_directory(root, "thread records")
-
-
-def _thread_dir(records: Path, thread_id: str) -> Path:
-    canonical = validate_canonical_thread_id(thread_id)
-    return threads_root(records) / canonical
-
-
 def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
     parent = path.parent
-    _reject_symlink(parent, "thread metadata parent")
-    if path.exists():
-        _reject_symlink(path, "thread metadata destination")
+    try:
+        if parent.is_symlink():
+            raise integrity("thread metadata parent must not be a symbolic link", path=parent)
+    except OSError as error:
+        raise integrity("thread metadata parent could not be inspected", path=parent) from error
+    if path.exists() or path.is_symlink():
+        try:
+            if path.is_symlink():
+                raise integrity("thread metadata must not be a symbolic link", path=path)
+        except OSError as error:
+            raise integrity("thread metadata could not be inspected", path=path) from error
     serialized = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_BINARY"):
@@ -141,26 +129,25 @@ def _is_complete_thread_dir(thread_dir: Path) -> bool:
         return False
     metadata_path = thread_dir / _THREAD_FILENAME
     sessions_dir = thread_dir / _SESSIONS_DIRNAME
+    if metadata_path.is_symlink() or sessions_dir.is_symlink():
+        return False
     return (
         metadata_path.is_file()
-        and not metadata_path.is_symlink()
         and sessions_dir.is_dir()
-        and not sessions_dir.is_symlink()
     )
 
 
 def load_thread(records: Path, thread_id: str) -> ThreadRecord:
-    canonical = validate_canonical_thread_id(thread_id)
-    thread_dir = _thread_dir(records, canonical)
-    metadata_path = thread_dir / _THREAD_FILENAME
-    sessions_dir = thread_dir / _SESSIONS_DIRNAME
+    validate_storage_ancestry(records, thread_id=thread_id)
+    thread_dir, sessions_dir, metadata_path = require_thread_workspace(records, thread_id)
+    if metadata_path.is_symlink():
+        raise integrity("thread metadata must not be a symbolic link", path=metadata_path)
     _require_regular_file(metadata_path, "thread metadata")
-    _require_directory(sessions_dir, "encounter records")
     document = load_metadata_document(metadata_path)
     return document_to_record(
         document,
         path=metadata_path,
-        directory_id=canonical,
+        directory_id=thread_dir.name,
         sessions_dir=sessions_dir,
     )
 
@@ -181,11 +168,12 @@ def create_thread(
         raise integrity("thread provisional title must not be empty")
 
     thread_id = str(uuid.uuid4())
-    thread_dir = _thread_dir(records, thread_id)
+    threads = require_threads_root(records)
+    thread_dir = threads / thread_id
     sessions_dir = thread_dir / _SESSIONS_DIRNAME
     metadata_path = thread_dir / _THREAD_FILENAME
 
-    if thread_dir.exists():
+    if thread_dir.exists() or thread_dir.is_symlink():
         raise integrity("thread directory already exists", path=thread_dir)
 
     try:
@@ -224,30 +212,21 @@ def _pending_filename() -> str:
     return f"{_PENDING_PREFIX}{secrets.token_hex(8)}.md"
 
 
-def _resolve_direct_child(sessions_dir: Path, path: Path) -> Path:
-    sessions_root = sessions_dir.resolve()
-    candidate = path.resolve()
-    if candidate.parent != sessions_root:
-        raise integrity("encounter path must be a direct child of sessions", path=path)
-    return sessions_root / validate_safe_filename(candidate.name, path=path, label="encounter path")
-
-
 def create_pending_encounter(
     records: Path,
     thread_id: str,
     *,
     path: Path | None = None,
 ) -> Path:
-    thread_dir = _thread_dir(records, thread_id)
-    _require_directory(thread_dir, "thread directory")
-    sessions_dir = _require_directory(thread_dir / _SESSIONS_DIRNAME, "encounter records")
+    validate_storage_ancestry(records, thread_id=thread_id)
+    _thread_dir, sessions_dir, _metadata_path = require_thread_workspace(records, thread_id)
 
     if path is None:
         destination = sessions_dir / _pending_filename()
         while destination.exists() or destination.is_symlink():
             destination = sessions_dir / _pending_filename()
     else:
-        destination = _resolve_direct_child(sessions_dir, path)
+        destination = resolve_pending_child(sessions_dir, path)
 
     if destination.exists() or destination.is_symlink():
         raise integrity("encounter record already exists", path=destination)
@@ -299,12 +278,12 @@ def finalize_thread_encounter(
     thread_id: str,
     encounter_path: Path,
 ) -> ThreadRecord:
-    thread_dir = _thread_dir(records, thread_id)
-    sessions_dir = _require_directory(thread_dir / _SESSIONS_DIRNAME, "encounter records")
-    pending = _resolve_direct_child(sessions_dir, encounter_path)
+    validate_storage_ancestry(records, thread_id=thread_id)
+    thread_dir, sessions_dir, metadata_path = require_thread_workspace(records, thread_id)
+    pending = resolve_pending_child(sessions_dir, encounter_path)
     _require_regular_file(pending, "pending encounter record")
-    if not pending.name.startswith(_PENDING_PREFIX):
-        raise integrity("encounter record is not pending", path=pending)
+
+    current = load_thread(records, thread_id)
 
     try:
         payload = pending.read_bytes()
@@ -315,12 +294,6 @@ def finalize_thread_encounter(
         raise integrity("encounter record could not be read", path=pending) from error
 
     final_path = _publish_final_encounter(sessions_dir, session_date=parsed.session_date, payload=payload)
-    try:
-        pending.unlink()
-    except OSError as error:
-        raise integrity("pending encounter record could not be removed", path=pending) from error
-
-    current = load_thread(records, thread_id)
     updated = ThreadRecord(
         id=current.id,
         provisional_title=current.provisional_title,
@@ -332,12 +305,25 @@ def finalize_thread_encounter(
         latest_encounter=final_path.name,
         next_step=parsed.next_step,
     )
-    metadata_path = thread_dir / _THREAD_FILENAME
-    _save_thread_metadata(metadata_path, updated)
+    try:
+        _save_thread_metadata(metadata_path, updated)
+    except (IntegrityError, OSError):
+        try:
+            if final_path.exists() or final_path.is_symlink():
+                final_path.unlink()
+        except OSError:
+            pass
+        raise
+
+    try:
+        pending.unlink()
+    except OSError as error:
+        raise integrity("pending encounter record could not be removed", path=pending) from error
     return updated
 
 
 def mark_thread_incomplete(records: Path, thread_id: str) -> ThreadRecord:
+    validate_storage_ancestry(records, thread_id=thread_id)
     current = load_thread(records, thread_id)
     updated = ThreadRecord(
         id=current.id,
@@ -350,18 +336,21 @@ def mark_thread_incomplete(records: Path, thread_id: str) -> ThreadRecord:
         latest_encounter=current.latest_encounter,
         next_step=current.next_step,
     )
-    metadata_path = _thread_dir(records, thread_id) / _THREAD_FILENAME
+    _thread_dir, _sessions_dir, metadata_path = require_thread_workspace(records, thread_id)
     _save_thread_metadata(metadata_path, updated)
     return updated
 
 
 def list_threads(records: Path) -> tuple[ThreadSummary, ...]:
-    root = threads_root(records)
-    if not root.is_dir() or root.is_symlink():
+    records_root = require_records_root(records)
+    threads = records_root / "threads"
+    if threads.is_symlink():
+        raise integrity("thread records must not be a symbolic link", path=threads)
+    if not threads.is_dir():
         return ()
 
     summaries: list[ThreadSummary] = []
-    for entry in sorted(root.iterdir(), key=lambda item: item.name):
+    for entry in sorted(threads.iterdir(), key=lambda item: item.name):
         if not _is_complete_thread_dir(entry):
             continue
         record = load_thread(records, entry.name)
@@ -385,22 +374,21 @@ def list_threads(records: Path) -> tuple[ThreadSummary, ...]:
     return tuple(summaries)
 
 
-def _legacy_sessions_dir(records: Path) -> Path:
-    legacy_dir = records / _LEGACY_SESSIONS_DIRNAME
+def discover_legacy_sessions(records: Path) -> tuple[LegacySessionSummary, ...]:
+    records_root = require_records_root(records)
+    legacy_dir = records_root / "sessions"
     if legacy_dir.is_symlink():
         raise integrity("legacy session records root must not be a symbolic link", path=legacy_dir)
     if not legacy_dir.is_dir():
         raise integrity("legacy session records root is not a directory", path=legacy_dir)
-    return legacy_dir.resolve()
 
-
-def discover_legacy_sessions(records: Path) -> tuple[LegacySessionSummary, ...]:
-    legacy_dir = _legacy_sessions_dir(records)
     discovered: list[LegacySessionSummary] = []
-
     for entry in sorted(legacy_dir.iterdir(), key=lambda item: item.name):
-        if entry.is_symlink():
-            raise integrity("legacy session record must not be a symbolic link", path=entry)
+        try:
+            if entry.is_symlink():
+                raise integrity("legacy session record must not be a symbolic link", path=entry)
+        except OSError as error:
+            raise integrity("legacy session record could not be inspected", path=entry) from error
         _require_regular_file(entry, "legacy session record")
         try:
             text = entry.read_text(encoding="utf-8")
@@ -428,15 +416,6 @@ def discover_legacy_sessions(records: Path) -> tuple[LegacySessionSummary, ...]:
     return tuple(discovered)
 
 
-def _require_legacy_direct_child(legacy_root: Path, legacy_path: Path) -> Path:
-    resolved = legacy_path.resolve()
-    root = legacy_root.resolve()
-    _reject_symlink(resolved, "legacy session record")
-    if resolved.parent != root:
-        raise integrity("legacy session must be a direct child of sessions", path=legacy_path)
-    return resolved
-
-
 def _copy_encounter_exclusive(source: Path, destination: Path) -> None:
     _require_regular_file(source, "legacy session record")
     if destination.exists() or destination.is_symlink():
@@ -461,8 +440,8 @@ def _copy_encounter_exclusive(source: Path, destination: Path) -> None:
 
 
 def import_legacy_session(records: Path, legacy_path: Path) -> ThreadRecord:
-    legacy_root = _legacy_sessions_dir(records)
-    resolved = _require_legacy_direct_child(legacy_root, legacy_path)
+    validate_storage_ancestry(records)
+    resolved = require_legacy_within_records(records, legacy_path)
     _require_regular_file(resolved, "legacy session record")
 
     try:
@@ -476,7 +455,7 @@ def import_legacy_session(records: Path, legacy_path: Path) -> ThreadRecord:
     status = "complete" if refined_title is not None else "incomplete"
 
     record = create_thread(records, goal=display_title, provisional_title=display_title)
-    thread_dir = _thread_dir(records, record.id)
+    thread_dir, _sessions_dir, metadata_path = require_thread_workspace(records, record.id)
     encounter_name = validate_safe_filename(resolved.name, path=resolved, label="legacy session filename")
     destination = thread_dir / _SESSIONS_DIRNAME / encounter_name
 
@@ -493,7 +472,6 @@ def import_legacy_session(records: Path, legacy_path: Path) -> ThreadRecord:
             latest_encounter=encounter_name,
             next_step=next_step,
         )
-        metadata_path = thread_dir / _THREAD_FILENAME
         _save_thread_metadata(metadata_path, imported)
     except IntegrityError:
         _remove_tree(thread_dir)

@@ -12,6 +12,7 @@ from unittest import mock
 
 from socratic_learn.errors import IntegrityError
 from socratic_learn.manifest import SESSION_HEADINGS
+from socratic_learn.thread_schema import parse_utc_timestamp
 from socratic_learn.threads import (
     THREAD_SCHEMA_VERSION,
     create_pending_encounter,
@@ -130,11 +131,14 @@ class ThreadStorageTests(unittest.TestCase):
         nested = sessions / "nested" / "record.md"
         nested.parent.mkdir()
         absolute = Path(tempfile.gettempdir()) / "absolute-session.md"
+        custom = sessions / "custom.md"
 
         with self.assertRaises(IntegrityError):
             create_pending_encounter(self.records, thread.id, path=nested)
         with self.assertRaises(IntegrityError):
             create_pending_encounter(self.records, thread.id, path=absolute)
+        with self.assertRaises(IntegrityError):
+            create_pending_encounter(self.records, thread.id, path=custom)
 
     def test_create_pending_encounter_is_exclusive_and_immutable(self) -> None:
         thread = create_thread(self.records, goal="series practice")
@@ -196,6 +200,20 @@ class ThreadStorageTests(unittest.TestCase):
         thread = create_thread(self.records, goal="interrupted study")
         incomplete = mark_thread_incomplete(self.records, thread.id)
         self.assertEqual("incomplete", incomplete.status)
+
+    def test_list_threads_sorts_different_instants_latest_first(self) -> None:
+        newer = create_thread(self.records, goal="newer")
+        older = create_thread(self.records, goal="older")
+        newer_meta = threads_root(self.records) / newer.id / "thread.json"
+        older_meta = threads_root(self.records) / older.id / "thread.json"
+        newer_payload = json.loads(newer_meta.read_text(encoding="utf-8"))
+        older_payload = json.loads(older_meta.read_text(encoding="utf-8"))
+        newer_payload["updated_at"] = "2026-01-03T12:00:00.000001Z"
+        older_payload["updated_at"] = "2026-01-03T12:00:00.000000Z"
+        newer_meta.write_text(json.dumps(newer_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        older_meta.write_text(json.dumps(older_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        summaries = list_threads(self.records)
+        self.assertEqual([newer.id, older.id], [item.id for item in summaries])
 
     def test_list_threads_sorts_by_parsed_updated_at_desc_then_id(self) -> None:
         first_id = "00000000-0000-4000-8000-000000000001"
@@ -306,6 +324,79 @@ class ThreadStorageTests(unittest.TestCase):
         first = create_thread(self.records, goal="personal")
         second = create_thread(other, goal="project")
         self.assertEqual([first.id], [item.id for item in list_threads(self.records)])
+        self.assertEqual([second.id], [item.id for item in list_threads(other)])
+
+    def test_parse_rejects_nonempty_preamble(self) -> None:
+        text = _valid_session_body(title="Math: Preamble", next_step="Continue.")
+        text = text.replace("\n\n## Outcome", "\nPreamble noise\n\n## Outcome", 1)
+        with self.assertRaises(IntegrityError):
+            parse_session_record(text)
+
+    def test_timestamp_fields_reject_non_string_types(self) -> None:
+        with self.assertRaises(IntegrityError):
+            parse_utc_timestamp(1735689600)
+        with self.assertRaises(IntegrityError):
+            parse_utc_timestamp(True)
+        with self.assertRaises(IntegrityError):
+            parse_utc_timestamp(None)
+
+    def test_load_thread_rejects_non_string_timestamp_fields(self) -> None:
+        created = create_thread(self.records, goal="typed")
+        metadata_path = threads_root(self.records) / created.id / "thread.json"
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        payload["updated_at"] = 123
+        metadata_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        with self.assertRaises(IntegrityError):
+            load_thread(self.records, created.id)
+
+    def test_finalize_removes_final_and_preserves_pending_on_metadata_failure(self) -> None:
+        thread = create_thread(self.records, goal="rollback")
+        pending = create_pending_encounter(self.records, thread.id)
+        pending.write_text(
+            _valid_session_body(title="Science: Rollback", next_step="Retry."),
+            encoding="utf-8",
+        )
+        with mock.patch(
+            "socratic_learn.thread_storage._save_thread_metadata",
+            side_effect=IntegrityError("metadata publish failed"),
+        ):
+            with self.assertRaises(IntegrityError):
+                finalize_thread_encounter(self.records, thread.id, pending)
+        self.assertTrue(pending.is_file())
+        finals = [
+            path
+            for path in (threads_root(self.records) / thread.id / "sessions").iterdir()
+            if path.is_file() and not path.name.startswith("pending-")
+        ]
+        self.assertEqual([], finals)
+
+    def test_legacy_import_rejects_foreign_records_root(self) -> None:
+        other = self.records.parent / "other-records"
+        other.mkdir()
+        (other / "sessions").mkdir()
+        foreign = other / "sessions" / "foreign.md"
+        foreign.write_text("broken", encoding="utf-8")
+        with self.assertRaises(IntegrityError):
+            import_legacy_session(self.records, foreign)
+
+    @unittest.skipUnless(_symlinks_supported(), "symlinks unavailable")
+    def test_load_thread_rejects_dangling_metadata_symlink(self) -> None:
+        created = create_thread(self.records, goal="dangling")
+        metadata_path = threads_root(self.records) / created.id / "thread.json"
+        metadata_path.unlink()
+        metadata_path.symlink_to(self.records.parent / "missing-thread.json")
+        with self.assertRaises(IntegrityError):
+            load_thread(self.records, created.id)
+
+    @unittest.skipUnless(_symlinks_supported(), "symlinks unavailable")
+    def test_create_rejects_symlink_records_root(self) -> None:
+        records_link = self.records.parent / "records-link"
+        try:
+            records_link.symlink_to(self.records, target_is_directory=True)
+        except OSError as error:
+            self.skipTest(f"directory symlinks unavailable: {error}")
+        with self.assertRaises(IntegrityError):
+            create_thread(records_link, goal="blocked")
 
     def test_parse_session_record_requires_subject_focus_title(self) -> None:
         parse_session_record(
