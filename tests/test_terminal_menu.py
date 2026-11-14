@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import io
 import re
+import sys
 import unittest
 from collections.abc import Iterator
+from contextlib import redirect_stdout
 from unittest.mock import Mock
 
 import socratic_learn.terminal_menu as terminal_menu
@@ -119,6 +121,24 @@ class TerminalMenuTests(unittest.TestCase):
         self.assertEqual("only", result)
         self.assertIn("Enter the number of your choice:", output.getvalue())
 
+    def test_numbered_fallback_builtin_input_prints_prompt_once(self) -> None:
+        output = io.StringIO()
+        with (
+            unittest.mock.patch.object(sys, "stdin", io.StringIO("1\n")),
+            redirect_stdout(output),
+        ):
+            result = choose_menu_item(
+                (MenuChoice("only", "Only"),),
+                output=output,
+                input_fn=input,
+                is_interactive=lambda: False,
+            )
+        self.assertEqual("only", result)
+        self.assertEqual(
+            1,
+            output.getvalue().count("Enter the number of your choice:"),
+        )
+
     def test_numbered_fallback_rejects_oversized_digit_strings(self) -> None:
         choices = (
             MenuChoice("a", "Alpha"),
@@ -195,7 +215,9 @@ class TerminalMenuTests(unittest.TestCase):
         final = output.getvalue()
         self.assertIn("Logic", final)
         self.assertIn("2025-11-01 · review sets", final)
-        self.assertNotIn("\x1b", final)
+        self.assertIn("New session", final)
+        self.assertIn("↑/↓ move · Enter select", final)
+        self.assertIn("\x1b", final)
 
     def test_interactive_unknown_key_does_not_move_selection(self) -> None:
         choices = (
@@ -213,7 +235,7 @@ class TerminalMenuTests(unittest.TestCase):
             read_key=lambda: next(keys),
         )
         self.assertEqual("stay", result)
-        self.assertTrue(output.getvalue().splitlines()[-1].startswith("> Stay here"))
+        self.assertIn("> Stay here", output.getvalue())
 
     def test_interactive_eof_raises_after_newline_flush(self) -> None:
         choices = (MenuChoice("only", "Only"),)
@@ -274,10 +296,8 @@ class TerminalMenuTests(unittest.TestCase):
             format_menu_row(choices[1], selected=True)
         )
         self.assertGreater(wide_width, tiny_width)
-        final_row = [part for part in output.getvalue().replace("\r", "\n").split("\n") if part.strip()][
-            -1
-        ]
-        self.assertGreater(len(final_row), tiny_width)
+        self.assertIn("数学数学", output.getvalue())
+        self.assertIn("> Tiny", output.getvalue())
 
     def test_interactive_redraw_erases_longer_previous_row(self) -> None:
         choices = (
@@ -298,12 +318,7 @@ class TerminalMenuTests(unittest.TestCase):
         )
         raw = output.getvalue()
         self.assertIn("> Tiny", raw)
-        final_row = [part for part in raw.replace("\r", "\n").split("\n") if part.strip()][
-            -1
-        ]
-        self.assertGreater(len(final_row), len("> Tiny"))
-        self.assertTrue(final_row.rstrip().endswith("Tiny"))
-        self.assertNotIn("\x1b", raw)
+        self.assertIn("\x1b[2K", raw)
 
     def test_interactive_ctrl_c_raises_keyboard_interrupt(self) -> None:
         choices = (MenuChoice("only", "Only"),)
@@ -329,9 +344,21 @@ class TerminalMenuTests(unittest.TestCase):
             is_interactive=lambda: True,
             read_key=lambda: KeyEvent.ENTER,
         )
-        lines = [line for line in output.getvalue().splitlines() if line.strip()]
-        self.assertTrue(lines[-1].startswith("> New session"))
-        self.assertNotIn("\x1b", output.getvalue())
+        self.assertIn("> New session", output.getvalue())
+        self.assertIn("  Resume", output.getvalue())
+
+    def test_interactive_rows_truncate_to_terminal_display_width(self) -> None:
+        choices = (
+            MenuChoice("long", "A very long menu label", "with long detail"),
+            MenuChoice("short", "Short"),
+        )
+        lines = terminal_menu._interactive_lines(
+            choices,
+            selected_index=0,
+            columns=18,
+        )
+        self.assertTrue(all(terminal_menu._terminal_display_width(line) <= 18 for line in lines))
+        self.assertTrue(any(line.endswith("…") for line in lines))
 
     def test_omits_detail_when_absent(self) -> None:
         choices = (MenuChoice("x", "Plain label"),)
@@ -477,6 +504,37 @@ class NativeKeyParsingTests(unittest.TestCase):
         )
         blocking.assert_called_once()
         timed.assert_called_once()
+
+    def test_posix_raw_mode_spans_menu_and_restores_after_selection(self) -> None:
+        choices = (
+            MenuChoice("a", "Alpha"),
+            MenuChoice("b", "Beta"),
+        )
+        events = iter([KeyEvent.DOWN, KeyEvent.ENTER])
+        setraw = Mock()
+        restore = Mock()
+        with (
+            unittest.mock.patch.object(terminal_menu.os, "name", "posix"),
+            unittest.mock.patch.object(
+                terminal_menu,
+                "_read_posix_menu_key",
+                side_effect=lambda fd: next(events),
+            ),
+            unittest.mock.patch.object(
+                terminal_menu,
+                "_enter_posix_raw_mode",
+                return_value=(9, ("saved",), setraw, restore),
+            ),
+        ):
+            result = choose_menu_item(
+                choices,
+                output=io.StringIO(),
+                input_stream=Mock(fileno=Mock(return_value=9)),
+                is_interactive=lambda: True,
+            )
+        self.assertEqual("b", result)
+        setraw.assert_called_once_with(9)
+        restore.assert_called_once_with(9, ("saved",))
 
 
 if __name__ == "__main__":

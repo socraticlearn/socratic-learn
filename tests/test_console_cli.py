@@ -235,6 +235,32 @@ class ConsoleCliTests(unittest.TestCase):
         self.assertNotIn("Traceback", message)
         self.assert_banner_written_once()
 
+    def test_chooser_eof_exits_cleanly_without_traceback(self) -> None:
+        stderr = io.StringIO()
+        with (
+            mock.patch(
+                "socratic_learn.cli.run_learning",
+                side_effect=EOFError("terminal menu input ended"),
+            ),
+            contextlib.redirect_stderr(stderr),
+        ):
+            exit_code = main([])
+        self.assertEqual(130, exit_code)
+        self.assertNotIn("Traceback", stderr.getvalue())
+
+    def test_chooser_ctrl_c_exits_cleanly_without_traceback(self) -> None:
+        stderr = io.StringIO()
+        with (
+            mock.patch(
+                "socratic_learn.cli.run_learning",
+                side_effect=KeyboardInterrupt,
+            ),
+            contextlib.redirect_stderr(stderr),
+        ):
+            exit_code = main([])
+        self.assertEqual(130, exit_code)
+        self.assertNotIn("Traceback", stderr.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

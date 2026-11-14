@@ -6,6 +6,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 import os
+import shutil
 import sys
 import unicodedata
 from typing import TextIO
@@ -23,6 +24,7 @@ __all__ = (
 _POSIX_ESCAPE_TIMEOUT_SECONDS = 0.05
 _NUMBERED_INVALID_HINT = "Enter a number from 1 to {count} using digits only."
 _MENU_EOF_MESSAGE = "terminal menu input ended"
+_INTERACTIVE_HINT = "↑/↓ move · Enter select"
 _NOT_PROVIDED = object()
 
 
@@ -216,6 +218,8 @@ def _read_numbered_answer(
     output.flush()
     if input_fn is not None:
         try:
+            if input_fn is input:
+                return input_fn()
             return input_fn(prompt)
         except EOFError:
             _terminate_on_eof(output)
@@ -251,28 +255,52 @@ def _choose_numbered(
         return choices[index - 1].value
 
 
-def _redraw_interactive_row(
-    output: TextIO,
-    row: str,
-    *,
-    previous_width: int,
-) -> int:
-    row_width = _terminal_display_width(row)
-    padding = max(0, previous_width - row_width)
-    output.write("\r" + row + (" " * padding))
-    output.flush()
-    return row_width + padding
+def _truncate_display_width(text: str, columns: int) -> str:
+    if columns <= 0:
+        return ""
+    if _terminal_display_width(text) <= columns:
+        return text
+    ellipsis = "…"
+    available = max(0, columns - _terminal_display_width(ellipsis))
+    rendered: list[str] = []
+    width = 0
+    for character in text:
+        character_width = _terminal_display_width(character)
+        if width + character_width > available:
+            break
+        rendered.append(character)
+        width += character_width
+    return "".join(rendered) + ellipsis
 
 
-def _finalize_interactive_row(
-    output: TextIO,
-    row: str,
+def _interactive_lines(
+    choices: Sequence[MenuChoice],
     *,
-    previous_width: int,
+    selected_index: int,
+    columns: int,
+) -> tuple[str, ...]:
+    rows = tuple(
+        _truncate_display_width(
+            format_menu_row(choice, selected=index == selected_index),
+            columns,
+        )
+        for index, choice in enumerate(choices)
+    )
+    return rows + (_truncate_display_width(_INTERACTIVE_HINT, columns),)
+
+
+def _draw_interactive_menu(
+    output: TextIO,
+    lines: Sequence[str],
+    *,
+    redraw: bool,
 ) -> None:
-    row_width = _terminal_display_width(row)
-    padding = max(0, previous_width - row_width)
-    output.write("\r" + row + (" " * padding) + "\n")
+    if redraw:
+        output.write(f"\x1b[{len(lines)}F")
+        for line in lines:
+            output.write("\x1b[2K" + line + "\n")
+    else:
+        output.write("\n".join(lines) + "\n")
     output.flush()
 
 
@@ -283,10 +311,10 @@ def _choose_interactive(
     read_key: Callable[[], KeyEvent],
 ) -> str:
     index = 0
-    row_width = 0
+    columns = max(1, shutil.get_terminal_size(fallback=(80, 24)).columns)
+    lines = _interactive_lines(choices, selected_index=index, columns=columns)
+    _draw_interactive_menu(output, lines, redraw=False)
     while True:
-        row = format_menu_row(choices[index], selected=True)
-        row_width = _redraw_interactive_row(output, row, previous_width=row_width)
         event = read_key()
         if event is KeyEvent.UP:
             index = (index - 1) % len(choices)
@@ -295,8 +323,8 @@ def _choose_interactive(
         elif event is KeyEvent.UNKNOWN:
             continue
         elif event is KeyEvent.ENTER:
-            final = format_menu_row(choices[index], selected=True)
-            _finalize_interactive_row(output, final, previous_width=row_width)
+            output.write("\n")
+            output.flush()
             return choices[index].value
         elif event is KeyEvent.INTERRUPT:
             output.write("\n")
@@ -304,6 +332,8 @@ def _choose_interactive(
             raise KeyboardInterrupt
         elif event is KeyEvent.EOF:
             _terminate_on_eof(output)
+        lines = _interactive_lines(choices, selected_index=index, columns=columns)
+        _draw_interactive_menu(output, lines, redraw=True)
 
 
 def _posix_read_byte_blocking(fd: int) -> str | None:
@@ -394,6 +424,29 @@ def read_interactive_key() -> KeyEvent:
         termios.tcsetattr(fd, termios.TCSADRAIN, previous)
 
 
+def _enter_posix_raw_mode(
+    input_stream: TextIO,
+) -> tuple[
+    int,
+    object,
+    Callable[[int], None],
+    Callable[[int, object], None],
+]:
+    import termios
+    import tty
+
+    fd = input_stream.fileno()
+    previous = termios.tcgetattr(fd)
+
+    def setraw(descriptor: int) -> None:
+        tty.setraw(descriptor, termios.TCSANOW)
+
+    def restore(descriptor: int, state: object) -> None:
+        termios.tcsetattr(descriptor, termios.TCSADRAIN, state)
+
+    return fd, previous, setraw, restore
+
+
 def choose_menu_item(
     choices: Sequence[MenuChoice],
     *,
@@ -413,8 +466,23 @@ def choose_menu_item(
         else is_interactive()
     )
     if interactive:
-        reader = read_key or read_interactive_key
-        return _choose_interactive(choices, output=resolved_output, read_key=reader)
+        if read_key is not None or os.name == "nt":
+            reader = read_key or read_interactive_key
+            return _choose_interactive(
+                choices,
+                output=resolved_output,
+                read_key=reader,
+            )
+        fd, previous, setraw, restore = _enter_posix_raw_mode(resolved_input)
+        setraw(fd)
+        try:
+            return _choose_interactive(
+                choices,
+                output=resolved_output,
+                read_key=lambda: _read_posix_menu_key(fd),
+            )
+        finally:
+            restore(fd, previous)
 
     return _choose_numbered(
         choices,

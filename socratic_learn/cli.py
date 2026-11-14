@@ -266,6 +266,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except LearningTutorError as error:
         print(f"error: {error}", file=sys.stderr)
         return error.exit_code
+    except (EOFError, KeyboardInterrupt):
+        return 130
 
 
 def entry_point() -> NoReturn:
