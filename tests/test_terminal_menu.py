@@ -401,13 +401,32 @@ class TerminalMenuTests(unittest.TestCase):
             columns=40,
             rows=4,
         )
-        self.assertEqual(4, len(first))
-        self.assertEqual(4, len(scrolled))
+        self.assertEqual(3, len(first))
+        self.assertEqual(3, len(scrolled))
         self.assertIn("> Choice 0", first)
         self.assertNotIn("Choice 5", first)
         self.assertIn("> Choice 5", scrolled)
         self.assertNotIn("Choice 0", scrolled)
         self.assertEqual("↑/↓ move · Enter select", scrolled[-1])
+
+    def test_interactive_minimum_height_fits_choice_hint_and_final_newline(self) -> None:
+        lines = terminal_menu._interactive_lines(
+            (
+                MenuChoice("first", "First"),
+                MenuChoice("second", "Second"),
+            ),
+            selected_index=1,
+            columns=40,
+            rows=3,
+        )
+        self.assertEqual(("> Second", "↑/↓ move · Enter select"), lines)
+
+        with unittest.mock.patch.object(
+            terminal_menu.shutil,
+            "get_terminal_size",
+            return_value=os.terminal_size((40, 2)),
+        ):
+            self.assertFalse(terminal_menu._terminal_supports_interactive())
 
     def test_redraw_emits_only_visible_lines(self) -> None:
         output = io.StringIO()

@@ -12,11 +12,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
+import socratic_learn.thread_storage as thread_storage_module
 from socratic_learn.errors import IntegrityError
 from socratic_learn.manifest import SESSION_HEADINGS
 from socratic_learn.thread_schema import parse_utc_timestamp
 from socratic_learn.threads import (
     THREAD_SCHEMA_VERSION,
+    PendingLease,
     create_pending_encounter,
     create_pending_encounter_with_lease,
     create_thread,
@@ -760,6 +762,63 @@ class ThreadStorageTests(unittest.TestCase):
         self.assertIsNotNone(acquired)
         assert acquired is not None
         acquired.release()
+
+    def test_recovery_is_noop_when_another_process_already_recovered_pending(
+        self,
+    ) -> None:
+        thread = create_thread(self.records, goal="concurrent recovery")
+        pending = create_pending_encounter(self.records, thread.id)
+        pending.write_text(
+            _valid_session_body(
+                title="Logic: Recovered elsewhere",
+                next_step="Continue safely.",
+            ),
+            encoding="utf-8",
+        )
+        real_acquire = thread_storage_module._try_acquire_lease_path
+
+        def recover_before_acquire(lease_path: Path) -> PendingLease | None:
+            finalize_thread_encounter(self.records, thread.id, pending)
+            return real_acquire(lease_path)
+
+        with mock.patch.object(
+            thread_storage_module,
+            "_try_acquire_lease_path",
+            side_effect=recover_before_acquire,
+        ):
+            recovery = recover_pending_encounters(self.records, thread.id)
+
+        self.assertEqual(0, recovery.promoted)
+        self.assertEqual(0, recovery.discarded)
+        self.assertEqual(0, recovery.unsafe)
+        self.assertEqual(
+            "Logic: Recovered elsewhere",
+            load_thread(self.records, thread.id).refined_title,
+        )
+
+    def test_posix_lease_file_is_removed_before_unlock(self) -> None:
+        lease_path = self.records / "lease-order"
+        descriptor = os.open(lease_path, os.O_RDWR | os.O_CREAT | os.O_EXCL)
+        lease = PendingLease(lease_path, descriptor)
+        events: list[str] = []
+
+        with (
+            mock.patch.object(thread_storage_module.os, "name", "posix"),
+            mock.patch.object(
+                lease,
+                "_remove_if_same",
+                side_effect=lambda _identity: events.append("remove"),
+            ),
+            mock.patch.object(
+                thread_storage_module,
+                "_unlock_lease_descriptor",
+                side_effect=lambda _descriptor: events.append("unlock"),
+            ),
+        ):
+            lease.release(remove=True)
+
+        self.assertEqual(["remove", "unlock"], events)
+        lease_path.unlink()
 
     @unittest.skipUnless(_symlinks_supported(), "symlinks unavailable")
     def test_orphan_pending_symlink_is_untouched_and_reported(self) -> None:

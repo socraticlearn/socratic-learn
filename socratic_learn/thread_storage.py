@@ -64,12 +64,16 @@ class PendingLease:
             return
         self._descriptor = None
         identity = os.fstat(descriptor)
+        if remove and os.name != "nt":
+            self._remove_if_same(identity)
         try:
             _unlock_lease_descriptor(descriptor)
         finally:
             os.close(descriptor)
-        if not remove:
-            return
+        if remove and os.name == "nt":
+            self._remove_if_same(identity)
+
+    def _remove_if_same(self, identity: os.stat_result) -> None:
         try:
             current = self.path.stat(follow_symlinks=False)
             if (
@@ -701,7 +705,7 @@ def recover_pending_encounters(records: Path, thread_id: str) -> PendingRecovery
         records,
         thread_id,
     )
-    regular: list[tuple[int, str, Path]] = []
+    regular: list[tuple[int, str, Path, os.stat_result]] = []
     unsafe = 0
     for entry in sessions_dir.iterdir():
         if not (
@@ -717,20 +721,34 @@ def recover_pending_encounters(records: Path, thread_id: str) -> PendingRecovery
         if entry.is_symlink() or not stat.S_ISREG(status.st_mode):
             unsafe += 1
             continue
-        regular.append((status.st_mtime_ns, entry.name, entry))
+        regular.append((status.st_mtime_ns, entry.name, entry, status))
 
     promoted = 0
     discarded = 0
     active = 0
-    for _modified, _name, pending in sorted(regular):
+    for _modified, _name, pending, scanned_status in sorted(regular):
         if _pending_lease_path(pending).is_symlink():
             unsafe += 1
             continue
-        lease = try_acquire_pending_lease(records, thread_id, pending)
+        lease = _try_acquire_lease_path(_pending_lease_path(pending))
         if lease is None:
             active += 1
             continue
         try:
+            try:
+                current_status = pending.stat(follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            except OSError:
+                unsafe += 1
+                continue
+            if (
+                not stat.S_ISREG(current_status.st_mode)
+                or current_status.st_dev != scanned_status.st_dev
+                or current_status.st_ino != scanned_status.st_ino
+            ):
+                unsafe += 1
+                continue
             try:
                 parse_session_record(pending.read_text(encoding="utf-8"))
             except (IntegrityError, OSError, UnicodeError):

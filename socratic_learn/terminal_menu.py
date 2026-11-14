@@ -181,7 +181,7 @@ def _terminal_supports_interactive() -> bool:
     if term in {"dumb", "unknown"}:
         return False
     size = shutil.get_terminal_size(fallback=(80, 24))
-    return size.columns > 1 and size.lines > 1
+    return size.columns > 1 and size.lines > 2
 
 
 def _format_numbered_list(choices: Sequence[MenuChoice]) -> str:
@@ -288,7 +288,7 @@ def _interactive_lines(
     columns: int,
     rows: int,
 ) -> tuple[str, ...]:
-    viewport_height = max(1, rows - 1)
+    viewport_height = max(1, rows - 2)
     visible_count = min(len(choices), viewport_height)
     start = min(
         max(0, selected_index - visible_count + 1),
