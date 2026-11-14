@@ -1,0 +1,504 @@
+"""Thread filesystem storage and encounter lifecycle."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+import json
+import os
+import secrets
+import shutil
+import stat
+import uuid
+from pathlib import Path
+
+from .errors import IntegrityError
+from .thread_parsing import (
+    parse_session_record,
+    validate_legacy_session_content,
+)
+from .thread_schema import (
+    LegacySessionSummary,
+    ThreadRecord,
+    ThreadSummary,
+    document_to_record,
+    format_utc_timestamp,
+    integrity,
+    load_metadata_document,
+    parse_utc_timestamp,
+    record_to_document,
+    utc_now_timestamp,
+    validate_canonical_thread_id,
+    validate_safe_filename,
+)
+
+_THREAD_FILENAME = "thread.json"
+_SESSIONS_DIRNAME = "sessions"
+_LEGACY_SESSIONS_DIRNAME = "sessions"
+_PENDING_PREFIX = "pending-"
+
+
+def threads_root(records: Path) -> Path:
+    return records / "threads"
+
+
+def _reject_symlink(path: Path, description: str) -> None:
+    if path.is_symlink():
+        raise integrity(f"{description} must not be a symbolic link", path=path)
+
+
+def _require_directory(path: Path, description: str) -> Path:
+    _reject_symlink(path, description)
+    try:
+        if not path.is_dir():
+            raise integrity(f"{description} is not a directory", path=path)
+        return path.resolve()
+    except OSError as error:
+        raise integrity(f"{description} could not be inspected", path=path) from error
+
+
+def _require_regular_file(path: Path, description: str) -> None:
+    _reject_symlink(path, description)
+    try:
+        status = path.stat(follow_symlinks=False)
+    except OSError as error:
+        raise integrity(f"{description} could not be inspected", path=path) from error
+    if not stat.S_ISREG(status.st_mode):
+        raise integrity(f"{description} must be a regular file", path=path)
+
+
+def _remove_tree(path: Path) -> None:
+    try:
+        shutil.rmtree(path)
+    except OSError as error:
+        raise integrity("partial thread directory could not be removed", path=path) from error
+
+
+def ensure_threads_root(records: Path) -> Path:
+    root = threads_root(records)
+    if root.exists() or root.is_symlink():
+        return _require_directory(root, "thread records")
+    try:
+        root.mkdir(parents=True)
+    except OSError as error:
+        raise integrity("thread records directory could not be created", path=root) from error
+    return _require_directory(root, "thread records")
+
+
+def _thread_dir(records: Path, thread_id: str) -> Path:
+    canonical = validate_canonical_thread_id(thread_id)
+    return threads_root(records) / canonical
+
+
+def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
+    parent = path.parent
+    _reject_symlink(parent, "thread metadata parent")
+    if path.exists():
+        _reject_symlink(path, "thread metadata destination")
+    serialized = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+
+    temporary: Path | None = None
+    descriptor: int | None = None
+    try:
+        while temporary is None:
+            candidate = parent / f".{path.name}.{secrets.token_hex(8)}.tmp"
+            try:
+                descriptor = os.open(candidate, flags, 0o600)
+            except FileExistsError:
+                continue
+            except OSError as error:
+                raise integrity("thread metadata could not be created", path=candidate) from error
+            temporary = candidate
+
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            descriptor = None
+            stream.write(serialized)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.replace(temporary, path)
+        except OSError as error:
+            raise integrity("thread metadata could not be published", path=path) from error
+        temporary = None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
+
+
+def _save_thread_metadata(metadata_path: Path, record: ThreadRecord) -> None:
+    _atomic_write_json(metadata_path, record_to_document(record))
+
+
+def _is_complete_thread_dir(thread_dir: Path) -> bool:
+    if not thread_dir.is_dir() or thread_dir.is_symlink():
+        return False
+    metadata_path = thread_dir / _THREAD_FILENAME
+    sessions_dir = thread_dir / _SESSIONS_DIRNAME
+    return (
+        metadata_path.is_file()
+        and not metadata_path.is_symlink()
+        and sessions_dir.is_dir()
+        and not sessions_dir.is_symlink()
+    )
+
+
+def load_thread(records: Path, thread_id: str) -> ThreadRecord:
+    canonical = validate_canonical_thread_id(thread_id)
+    thread_dir = _thread_dir(records, canonical)
+    metadata_path = thread_dir / _THREAD_FILENAME
+    sessions_dir = thread_dir / _SESSIONS_DIRNAME
+    _require_regular_file(metadata_path, "thread metadata")
+    _require_directory(sessions_dir, "encounter records")
+    document = load_metadata_document(metadata_path)
+    return document_to_record(
+        document,
+        path=metadata_path,
+        directory_id=canonical,
+        sessions_dir=sessions_dir,
+    )
+
+
+def create_thread(
+    records: Path,
+    *,
+    goal: str,
+    provisional_title: str | None = None,
+) -> ThreadRecord:
+    cleaned_goal = goal.strip()
+    if not cleaned_goal:
+        raise integrity("thread goal must not be empty")
+
+    ensure_threads_root(records)
+    title = cleaned_goal if provisional_title is None else provisional_title.strip()
+    if not title:
+        raise integrity("thread provisional title must not be empty")
+
+    thread_id = str(uuid.uuid4())
+    thread_dir = _thread_dir(records, thread_id)
+    sessions_dir = thread_dir / _SESSIONS_DIRNAME
+    metadata_path = thread_dir / _THREAD_FILENAME
+
+    if thread_dir.exists():
+        raise integrity("thread directory already exists", path=thread_dir)
+
+    try:
+        thread_dir.mkdir()
+        sessions_dir.mkdir()
+    except OSError as error:
+        if thread_dir.exists():
+            _remove_tree(thread_dir)
+        raise integrity("thread directory could not be created", path=thread_dir) from error
+
+    timestamp = utc_now_timestamp()
+    record = ThreadRecord(
+        id=thread_id,
+        provisional_title=title,
+        refined_title=None,
+        original_goal=cleaned_goal,
+        status="active",
+        created_at=timestamp,
+        updated_at=timestamp,
+        latest_encounter=None,
+        next_step="",
+    )
+
+    try:
+        _atomic_write_json(metadata_path, record_to_document(record))
+    except IntegrityError:
+        _remove_tree(thread_dir)
+        raise
+    except OSError as error:
+        _remove_tree(thread_dir)
+        raise integrity("thread metadata could not be published", path=metadata_path) from error
+    return record
+
+
+def _pending_filename() -> str:
+    return f"{_PENDING_PREFIX}{secrets.token_hex(8)}.md"
+
+
+def _resolve_direct_child(sessions_dir: Path, path: Path) -> Path:
+    sessions_root = sessions_dir.resolve()
+    candidate = path.resolve()
+    if candidate.parent != sessions_root:
+        raise integrity("encounter path must be a direct child of sessions", path=path)
+    return sessions_root / validate_safe_filename(candidate.name, path=path, label="encounter path")
+
+
+def create_pending_encounter(
+    records: Path,
+    thread_id: str,
+    *,
+    path: Path | None = None,
+) -> Path:
+    thread_dir = _thread_dir(records, thread_id)
+    _require_directory(thread_dir, "thread directory")
+    sessions_dir = _require_directory(thread_dir / _SESSIONS_DIRNAME, "encounter records")
+
+    if path is None:
+        destination = sessions_dir / _pending_filename()
+        while destination.exists() or destination.is_symlink():
+            destination = sessions_dir / _pending_filename()
+    else:
+        destination = _resolve_direct_child(sessions_dir, path)
+
+    if destination.exists() or destination.is_symlink():
+        raise integrity("encounter record already exists", path=destination)
+
+    try:
+        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as error:
+        raise integrity("encounter record already exists", path=destination) from error
+    except OSError as error:
+        raise integrity("encounter record could not be created", path=destination) from error
+
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.flush()
+            os.fsync(stream.fileno())
+    except OSError as error:
+        raise integrity("encounter record could not be created", path=destination) from error
+    return destination
+
+
+def _publish_final_encounter(sessions_dir: Path, *, session_date: str, payload: bytes) -> Path:
+    final_name = validate_safe_filename(f"{session_date}-{secrets.token_hex(4)}.md", label="final encounter")
+    destination = sessions_dir / final_name
+    if destination.exists() or destination.is_symlink():
+        raise integrity("final encounter record already exists", path=destination)
+    try:
+        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as error:
+        raise integrity("final encounter record already exists", path=destination) from error
+    except OSError as error:
+        raise integrity("final encounter record could not be created", path=destination) from error
+
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except OSError as error:
+        try:
+            destination.unlink()
+        except OSError:
+            pass
+        raise integrity("final encounter record could not be created", path=destination) from error
+    return destination
+
+
+def finalize_thread_encounter(
+    records: Path,
+    thread_id: str,
+    encounter_path: Path,
+) -> ThreadRecord:
+    thread_dir = _thread_dir(records, thread_id)
+    sessions_dir = _require_directory(thread_dir / _SESSIONS_DIRNAME, "encounter records")
+    pending = _resolve_direct_child(sessions_dir, encounter_path)
+    _require_regular_file(pending, "pending encounter record")
+    if not pending.name.startswith(_PENDING_PREFIX):
+        raise integrity("encounter record is not pending", path=pending)
+
+    try:
+        payload = pending.read_bytes()
+        parsed = parse_session_record(payload.decode("utf-8"))
+    except UnicodeDecodeError as error:
+        raise integrity("encounter record is not valid UTF-8", path=pending) from error
+    except OSError as error:
+        raise integrity("encounter record could not be read", path=pending) from error
+
+    final_path = _publish_final_encounter(sessions_dir, session_date=parsed.session_date, payload=payload)
+    try:
+        pending.unlink()
+    except OSError as error:
+        raise integrity("pending encounter record could not be removed", path=pending) from error
+
+    current = load_thread(records, thread_id)
+    updated = ThreadRecord(
+        id=current.id,
+        provisional_title=current.provisional_title,
+        refined_title=parsed.refined_title,
+        original_goal=current.original_goal,
+        status="complete",
+        created_at=current.created_at,
+        updated_at=utc_now_timestamp(),
+        latest_encounter=final_path.name,
+        next_step=parsed.next_step,
+    )
+    metadata_path = thread_dir / _THREAD_FILENAME
+    _save_thread_metadata(metadata_path, updated)
+    return updated
+
+
+def mark_thread_incomplete(records: Path, thread_id: str) -> ThreadRecord:
+    current = load_thread(records, thread_id)
+    updated = ThreadRecord(
+        id=current.id,
+        provisional_title=current.provisional_title,
+        refined_title=current.refined_title,
+        original_goal=current.original_goal,
+        status="incomplete",
+        created_at=current.created_at,
+        updated_at=utc_now_timestamp(),
+        latest_encounter=current.latest_encounter,
+        next_step=current.next_step,
+    )
+    metadata_path = _thread_dir(records, thread_id) / _THREAD_FILENAME
+    _save_thread_metadata(metadata_path, updated)
+    return updated
+
+
+def list_threads(records: Path) -> tuple[ThreadSummary, ...]:
+    root = threads_root(records)
+    if not root.is_dir() or root.is_symlink():
+        return ()
+
+    summaries: list[ThreadSummary] = []
+    for entry in sorted(root.iterdir(), key=lambda item: item.name):
+        if not _is_complete_thread_dir(entry):
+            continue
+        record = load_thread(records, entry.name)
+        if record.id != entry.name:
+            continue
+        summaries.append(
+            ThreadSummary(
+                id=record.id,
+                display_title=record.refined_title or record.provisional_title,
+                updated_at=record.updated_at,
+                next_step=record.next_step,
+                status=record.status,
+            )
+        )
+
+    summaries.sort(key=lambda item: item.id)
+    summaries.sort(
+        key=lambda item: parse_utc_timestamp(item.updated_at, field="updated_at"),
+        reverse=True,
+    )
+    return tuple(summaries)
+
+
+def _legacy_sessions_dir(records: Path) -> Path:
+    legacy_dir = records / _LEGACY_SESSIONS_DIRNAME
+    if legacy_dir.is_symlink():
+        raise integrity("legacy session records root must not be a symbolic link", path=legacy_dir)
+    if not legacy_dir.is_dir():
+        raise integrity("legacy session records root is not a directory", path=legacy_dir)
+    return legacy_dir.resolve()
+
+
+def discover_legacy_sessions(records: Path) -> tuple[LegacySessionSummary, ...]:
+    legacy_dir = _legacy_sessions_dir(records)
+    discovered: list[LegacySessionSummary] = []
+
+    for entry in sorted(legacy_dir.iterdir(), key=lambda item: item.name):
+        if entry.is_symlink():
+            raise integrity("legacy session record must not be a symbolic link", path=entry)
+        _require_regular_file(entry, "legacy session record")
+        try:
+            text = entry.read_text(encoding="utf-8")
+        except UnicodeDecodeError as error:
+            raise integrity("legacy session is not valid UTF-8", path=entry) from error
+        except OSError as error:
+            raise integrity("legacy session could not be read", path=entry) from error
+
+        display_title, next_step, _refined = validate_legacy_session_content(text)
+        status = entry.stat(follow_symlinks=False)
+        discovered.append(
+            LegacySessionSummary(
+                path=entry,
+                display_title=display_title,
+                updated_at=format_utc_timestamp(datetime.fromtimestamp(status.st_mtime, tz=UTC)),
+                next_step=next_step,
+            )
+        )
+
+    discovered.sort(key=lambda item: item.path.name)
+    discovered.sort(
+        key=lambda item: parse_utc_timestamp(item.updated_at, field="updated_at"),
+        reverse=True,
+    )
+    return tuple(discovered)
+
+
+def _require_legacy_direct_child(legacy_root: Path, legacy_path: Path) -> Path:
+    resolved = legacy_path.resolve()
+    root = legacy_root.resolve()
+    _reject_symlink(resolved, "legacy session record")
+    if resolved.parent != root:
+        raise integrity("legacy session must be a direct child of sessions", path=legacy_path)
+    return resolved
+
+
+def _copy_encounter_exclusive(source: Path, destination: Path) -> None:
+    _require_regular_file(source, "legacy session record")
+    if destination.exists() or destination.is_symlink():
+        raise integrity("encounter record already exists", path=destination)
+    try:
+        payload = source.read_bytes()
+    except OSError as error:
+        raise integrity("legacy session could not be read", path=source) from error
+    try:
+        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as error:
+        raise integrity("encounter record already exists", path=destination) from error
+    except OSError as error:
+        raise integrity("encounter record could not be created", path=destination) from error
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except OSError as error:
+        raise integrity("encounter record could not be created", path=destination) from error
+
+
+def import_legacy_session(records: Path, legacy_path: Path) -> ThreadRecord:
+    legacy_root = _legacy_sessions_dir(records)
+    resolved = _require_legacy_direct_child(legacy_root, legacy_path)
+    _require_regular_file(resolved, "legacy session record")
+
+    try:
+        text = resolved.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        raise integrity("legacy session is not valid UTF-8", path=resolved) from error
+    except OSError as error:
+        raise integrity("legacy session could not be read", path=resolved) from error
+
+    display_title, next_step, refined_title = validate_legacy_session_content(text)
+    status = "complete" if refined_title is not None else "incomplete"
+
+    record = create_thread(records, goal=display_title, provisional_title=display_title)
+    thread_dir = _thread_dir(records, record.id)
+    encounter_name = validate_safe_filename(resolved.name, path=resolved, label="legacy session filename")
+    destination = thread_dir / _SESSIONS_DIRNAME / encounter_name
+
+    try:
+        _copy_encounter_exclusive(resolved, destination)
+        imported = ThreadRecord(
+            id=record.id,
+            provisional_title=record.provisional_title,
+            refined_title=refined_title,
+            original_goal=record.original_goal,
+            status=status,
+            created_at=record.created_at,
+            updated_at=utc_now_timestamp(),
+            latest_encounter=encounter_name,
+            next_step=next_step,
+        )
+        metadata_path = thread_dir / _THREAD_FILENAME
+        _save_thread_metadata(metadata_path, imported)
+    except IntegrityError:
+        _remove_tree(thread_dir)
+        raise
+    except OSError as error:
+        _remove_tree(thread_dir)
+        raise integrity("legacy session import could not be completed", path=resolved) from error
+    return imported
