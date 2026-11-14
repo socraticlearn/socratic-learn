@@ -6,8 +6,8 @@ first successful tag release completes after these external steps.
 ## PyPI
 
 - Enable PyPI trusted publishing for repository `socraticlearn/socratic-learn`,
-  workflow file `.github/workflows/release.yml`, environment **`pypi`**, and
-  the protected **`pypi`** environment in GitHub.
+  workflow **`release.yml`**, environment **`pypi`**, and the protected
+  **`pypi`** environment in GitHub.
 - The `publish-pypi` job depends on `publish-github`, downloads artifact
   `python-package`, and uses `pypa/gh-action-pypi-publish@release/v1` with
   `id-token: write` (no API tokens).
@@ -17,10 +17,12 @@ first successful tag release completes after these external steps.
 - Configure npm trusted publishers for organization **`socraticlearn`**,
   package **`@socraticlearn/cli`**, GitHub repository **`socratic-learn`**,
   workflow **`release.yml`**, and GitHub environment **`npm`**.
+- In the npm trusted-publisher policy, explicitly allow direct **`npm publish`**
+  for workflow **`release.yml`** (not only provenance-only flows).
 - The `publish-npm` job depends on `publish-github`, downloads artifact
-  `npm-package`, runs on Node **24** with **npm >= 11.5.1**, registry
-  `https://registry.npmjs.org`, and `npm publish … --access public` (no
-  `NODE_AUTH_TOKEN` or `NPM_TOKEN`).
+  `npm-package`, runs on Node **24** with **npm >= 11.5.1**, sets the registry
+  with `npm config set registry https://registry.npmjs.org`, and runs
+  `npm publish … --access public` without `NODE_AUTH_TOKEN` or `NPM_TOKEN`.
 
 ## First publication checkpoint
 

@@ -1188,6 +1188,20 @@ def workflow_job_needs(job: str) -> list[str]:
     return needs
 
 
+def workflow_setup_node_steps(*jobs: str) -> list[str]:
+    steps: list[str] = []
+    for job in jobs:
+        if not job:
+            continue
+        for step in workflow_steps(job):
+            first_line = step.splitlines()[0]
+            if first_line.endswith("actions/setup-node@v4") or first_line.endswith(
+                "actions/setup-node@v6"
+            ):
+                steps.append(step)
+    return steps
+
+
 def workflow_action_step(job: str, action: str) -> str:
     line = f"      - uses: {action}"
     return next(
@@ -1512,16 +1526,22 @@ def validate_release_automation(root: Path) -> list[str]:
                 errors.append(
                     "npm-package job is missing required Node build or smoke steps"
                 )
-            if "cache: false" not in npm_package:
+            if "package-manager-cache: false" not in npm_package:
+                errors.append(
+                    "npm-package job is missing required Node build or smoke steps"
+                )
+            if "actions/setup-node@v6" not in npm_package:
                 errors.append(
                     "npm-package job is missing required Node build or smoke steps"
                 )
             for term in (
                 "npm@>=11.5.1",
                 "tools/build_npm_package.py",
+                "packages/npm-cli/package.json",
                 "npm test --prefix packages/npm-cli",
                 "npx --yes --package",
                 "@socraticlearn/cli",
+                "socraticlearn-cli-",
             ):
                 if term not in npm_package:
                     errors.append(
@@ -1551,6 +1571,39 @@ def validate_release_automation(root: Path) -> list[str]:
                 errors.append(
                     "npm-package job must download the python-package artifact"
                 )
+            npm_setup_steps = workflow_setup_node_steps(npm_package)
+            if not npm_setup_steps:
+                errors.append(
+                    "npm-package job must configure Node through setup-node@v6"
+                )
+            for step in npm_setup_steps:
+                if "registry-url:" in step or "registry_url:" in step.lower():
+                    errors.append(
+                        "npm setup-node must not set registry-url or auth injection"
+                    )
+                if "cache: false" in step and "package-manager-cache" not in step:
+                    errors.append(
+                        "npm setup-node must use package-manager-cache: false"
+                    )
+            npm_pkg_path = root / "packages/npm-cli/package.json"
+            if npm_pkg_path.is_file():
+                try:
+                    npm_identity = json.loads(
+                        npm_pkg_path.read_text(encoding="utf-8")
+                    ).get("name")
+                except (json.JSONDecodeError, AttributeError):
+                    npm_identity = None
+                if npm_identity != "@socraticlearn/cli":
+                    errors.append(
+                        "npm package metadata must identify @socraticlearn/cli"
+                    )
+                elif (
+                    f'"{npm_identity}"' not in npm_package
+                    and npm_identity not in npm_package
+                ):
+                    errors.append(
+                        "npm-package job must verify canonical package identity"
+                    )
 
         github_needs = workflow_job_needs(github_publish)
         if "python-package" not in github_needs or "npm-package" not in github_needs:
@@ -1576,20 +1629,57 @@ def validate_release_automation(root: Path) -> list[str]:
             )
 
         if publish_npm:
+            if publish_gate not in publish_npm.split("steps:", 1)[0]:
+                errors.append(
+                    "npm publishing must require a push event and version tag"
+                )
             if "environment: npm" not in publish_npm:
                 errors.append("npm publishing must use protected environment npm")
             if "id-token: write" not in publish_npm:
                 errors.append("npm publishing must grant id-token: write")
             npm_needs = workflow_job_needs(publish_npm)
-            if "publish-github" not in npm_needs and "needs: publish-github" not in publish_npm:
+            if npm_needs and npm_needs != ["publish-github"]:
+                errors.append(
+                    "Registry publication jobs must remain independent after publish-github"
+                )
+            elif "publish-github" not in npm_needs and "needs: publish-github" not in publish_npm:
                 errors.append(
                     "npm publishing must wait for publish-github"
                 )
-            if "registry-url: https://registry.npmjs.org" not in publish_npm:
+            if "publish-pypi" in npm_needs:
                 errors.append(
-                    "npm publishing must target https://registry.npmjs.org"
+                    "Registry publication jobs must remain independent after publish-github"
+                )
+            publish_setup_steps = workflow_setup_node_steps(publish_npm)
+            if not publish_setup_steps or not all(
+                "actions/setup-node@v6" in step for step in publish_setup_steps
+            ):
+                errors.append(
+                    "npm publishing must use Node 24 with caching disabled"
+                )
+            for step in publish_setup_steps:
+                if "registry-url:" in step or "registry_url:" in step.lower():
+                    errors.append(
+                        "npm setup-node must not set registry-url or auth injection"
+                    )
+                if "package-manager-cache: false" not in step:
+                    errors.append(
+                        "npm publishing must use Node 24 with caching disabled"
+                    )
+            registry_config = "npm config set registry https://registry.npmjs.org"
+            if registry_config not in publish_npm:
+                errors.append(
+                    "npm publishing must set registry explicitly before publish"
+                )
+            elif publish_npm.index(registry_config) > publish_npm.index("npm publish"):
+                errors.append(
+                    "npm publishing must set registry explicitly before publish"
                 )
             if "npm publish" not in publish_npm or "--access public" not in publish_npm:
+                errors.append(
+                    "npm publishing must publish @socraticlearn/cli publicly"
+                )
+            if "@socraticlearn/cli" not in publish_npm:
                 errors.append(
                     "npm publishing must publish @socraticlearn/cli publicly"
                 )
@@ -1611,10 +1701,6 @@ def validate_release_automation(root: Path) -> list[str]:
                 errors.append(
                     "npm publishing must use Node 24 with caching disabled"
                 )
-            if "cache: false" not in publish_npm:
-                errors.append(
-                    "npm publishing must use Node 24 with caching disabled"
-                )
             if "npm@>=11.5.1" not in publish_npm:
                 errors.append(
                     "npm publishing must meet npm trusted publishing version floor"
@@ -1623,13 +1709,25 @@ def validate_release_automation(root: Path) -> list[str]:
             errors.append("Release workflow must include a publish-npm job")
 
         pypi_needs = workflow_job_needs(pypi_publish)
-        if "publish-github" not in pypi_needs and "needs: publish-github" not in pypi_publish:
+        if pypi_needs and pypi_needs != ["publish-github"]:
+            errors.append(
+                "Registry publication jobs must remain independent after publish-github"
+            )
+        elif "publish-github" not in pypi_needs and "needs: publish-github" not in pypi_publish:
             errors.append(
                 "Registry publishing must wait for publish-github"
             )
         if "python-package" in pypi_needs:
             errors.append(
                 "PyPI publishing must not bypass the GitHub release gate"
+            )
+        if "publish-npm" in pypi_needs:
+            errors.append(
+                "Registry publication jobs must remain independent after publish-github"
+            )
+        if publish_gate not in pypi_publish.split("steps:", 1)[0]:
+            errors.append(
+                "PyPI publishing must require a push event and version tag"
             )
         if any(
             marker in release_lower
@@ -1641,6 +1739,8 @@ def validate_release_automation(root: Path) -> list[str]:
                 "password:",
                 "node_auth_token",
                 "npm_token",
+                "_authtoken",
+                "always-auth",
             )
         ):
             errors.append(
@@ -1733,6 +1833,34 @@ def validate_release_automation(root: Path) -> list[str]:
             errors.append(
                 "Release version gate must add the checkout to sys.path before import"
             )
+        if not release.endswith("\n"):
+            errors.append("Release workflow must end with a trailing newline")
+        elif release.endswith("\n\n"):
+            errors.append(
+                "Release workflow must not include extra trailing newlines"
+            )
+
+        maintainer = root / "docs/maintainer-registry-trusted-publishing.md"
+        if maintainer.is_file():
+            maintainer_text = maintainer.read_text(encoding="utf-8")
+            if (
+                "workflow `release.yml`" not in maintainer_text
+                and "**`release.yml`**" not in maintainer_text
+            ):
+                errors.append(
+                    "Maintainer registry doc must name workflow release.yml"
+                )
+            if (
+                "direct `npm publish`" not in maintainer_text
+                and "direct **`npm publish`**" not in maintainer_text
+            ):
+                errors.append(
+                    "Maintainer registry doc must require direct npm publish"
+                )
+            if not maintainer_text.endswith("\n") or maintainer_text.endswith("\n\n"):
+                errors.append(
+                    "Maintainer registry doc must end with a single trailing newline"
+                )
 
     normal_path = root / ".github/workflows/native-python.yml"
     workflow_paths = (

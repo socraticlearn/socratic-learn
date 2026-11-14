@@ -2871,8 +2871,16 @@ class RepositoryValidationTests(unittest.TestCase):
             "Release publishing must require a push event and version tag",
             errors,
         )
-        self.assertIn(
-            "Registry publishing must wait for publish-github",
+        self.assertTrue(
+            any(
+                phrase in error
+                for error in errors
+                for phrase in (
+                    "Registry publishing must wait for publish-github",
+                    "PyPI publishing must not bypass the GitHub release gate",
+                    "Registry publication jobs must remain independent after publish-github",
+                )
+            ),
             errors,
         )
 
@@ -3779,6 +3787,8 @@ class SynchronizedRegistryReleaseTests(unittest.TestCase):
         self.assertIn("needs: publish-github", npm_publish)
         self.assertNotIn("needs: python-package", pypi)
         self.assertNotIn("needs: npm-package", pypi)
+        self.assertNotIn("needs: publish-pypi", npm_publish)
+        self.assertNotIn("needs: publish-npm", pypi)
 
     def test_npm_package_job_builds_from_downloaded_python_artifact(self) -> None:
         npm = self.release.split("  npm-package:", 1)[1].split(
@@ -3786,21 +3796,27 @@ class SynchronizedRegistryReleaseTests(unittest.TestCase):
         )[0]
         for value in (
             "ubuntu-latest",
+            "actions/setup-node@v6",
             'node-version: "24"',
-            "cache: false",
+            "package-manager-cache: false",
             "npm@>=11.5.1",
             "name: python-package",
             "tools/build_npm_package.py",
+            "packages/npm-cli/package.json",
+            '"@socraticlearn/cli"',
             "npm test --prefix packages/npm-cli",
             "npx --yes --package",
             "socratic --version",
             "name: npm-package",
             "if-no-files-found: error",
             "@socraticlearn/cli",
+            "socraticlearn-cli-",
         ):
             with self.subTest(value=value):
                 self.assertIn(value, npm)
         self.assertNotIn("python -m build", npm)
+        self.assertNotIn("registry-url:", npm)
+        self.assertNotRegex(npm, r"(?m)^\s+cache:\s+false\s*$")
 
     def test_publish_github_attaches_python_and_npm_artifacts(self) -> None:
         github = self.release.split("  publish-github:", 1)[1].split(
@@ -3830,14 +3846,27 @@ class SynchronizedRegistryReleaseTests(unittest.TestCase):
         self.assertNotIn("tools/build_npm_package.py", pypi)
         self.assertIn("environment: npm", npm)
         self.assertIn("id-token: write", npm)
-        self.assertIn('registry-url: https://registry.npmjs.org', npm)
+        self.assertIn("actions/setup-node@v6", npm)
         self.assertIn('node-version: "24"', npm)
-        self.assertIn("cache: false", npm)
+        self.assertIn("package-manager-cache: false", npm)
+        self.assertIn(
+            "npm config set registry https://registry.npmjs.org",
+            npm,
+        )
         self.assertIn("npm publish", npm)
         self.assertIn("--access public", npm)
+        self.assertIn("@socraticlearn/cli", npm)
         self.assertIn("name: npm-package", npm)
+        self.assertNotIn("registry-url:", npm)
+        self.assertNotRegex(npm, r"(?m)^\s+cache:\s+false\s*$")
         self.assertNotIn("tools/build_npm_package.py", npm)
         self.assertNotIn("python -m build", npm)
+        publish_gate_index = npm.index(publish_gate)
+        self.assertLess(
+            publish_gate_index,
+            npm.index("steps:"),
+            "publish-npm must declare the tag gate before steps",
+        )
         lowered = release.lower()
         for forbidden in (
             "skip-existing",
@@ -3845,9 +3874,26 @@ class SynchronizedRegistryReleaseTests(unittest.TestCase):
             "npm_token",
             "pypi_api_token",
             "twine_password",
+            "_authtoken",
+            "always-auth",
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, lowered)
+
+    def test_release_workflow_ends_with_single_trailing_newline(self) -> None:
+        self.assertTrue(self.release.endswith("\n"))
+        self.assertFalse(self.release.endswith("\n\n"))
+
+    def test_maintainer_registry_doc_uses_release_yml_and_npm_publish(
+        self,
+    ) -> None:
+        path = self.root / "docs/maintainer-registry-trusted-publishing.md"
+        text = path.read_text(encoding="utf-8")
+        self.assertRegex(text, r"workflow \*\*`release\.yml`\*\*")
+        self.assertNotIn("workflow `.github/workflows/release.yml`", text)
+        self.assertRegex(text, r"direct \*\*`npm publish`\*\*")
+        self.assertTrue(text.endswith("\n"))
+        self.assertFalse(text.endswith("\n\n"))
 
     def test_validator_rejects_missing_npm_release_job(self) -> None:
         temp, root = RepositoryValidationTests.make_root(self)
@@ -3878,8 +3924,50 @@ class SynchronizedRegistryReleaseTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        errors = validate(root)
+        self.assertTrue(
+            any(
+                phrase in error
+                for error in errors
+                for phrase in (
+                    "Registry publishing must wait for publish-github",
+                    "PyPI publishing must not bypass the GitHub release gate",
+                )
+            ),
+            errors,
+        )
+
+    def test_validator_rejects_setup_node_registry_url_injection(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        release = root / ".github/workflows/release.yml"
+        release.write_text(
+            release.read_text(encoding="utf-8").replace(
+                "package-manager-cache: false",
+                "registry-url: https://registry.npmjs.org\n"
+                "          package-manager-cache: false",
+                1,
+            ),
+            encoding="utf-8",
+        )
         self.assertIn(
-            "Registry publishing must wait for publish-github",
+            "npm setup-node must not set registry-url or auth injection",
+            validate(root),
+        )
+
+    def test_validator_rejects_cross_dependent_registry_jobs(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        release = root / ".github/workflows/release.yml"
+        text = release.read_text(encoding="utf-8")
+        text = text.replace(
+            "needs: publish-github",
+            "needs:\n      - publish-github\n      - publish-npm",
+            1,
+        )
+        release.write_text(text, encoding="utf-8")
+        self.assertIn(
+            "Registry publication jobs must remain independent after publish-github",
             validate(root),
         )
 

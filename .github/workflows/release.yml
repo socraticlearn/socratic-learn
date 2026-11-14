@@ -108,10 +108,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "24"
-          cache: false
+          package-manager-cache: false
       - name: Use npm trusted publishing floor
         run: npm install -g "npm@>=11.5.1"
       - uses: actions/download-artifact@v4
@@ -124,6 +124,15 @@ jobs:
         run: |
           wheel="$(ls release-dist/socratic_learn-*-py3-none-any.whl)"
           python tools/build_npm_package.py "$wheel" --output-dir npm-dist
+      - name: Verify packed @socraticlearn/cli identity
+        run: |
+          name="$(node -p "require('./packages/npm-cli/package.json').name")"
+          test "$name" = "@socraticlearn/cli"
+          tarball="$(ls npm-dist/*.tgz)"
+          case "$(basename "$tarball")" in
+            socraticlearn-cli-*.tgz) ;;
+            *) echo "unexpected tarball: $tarball" >&2; exit 1 ;;
+          esac
       - name: Run npm package tests
         run: npm test --prefix packages/npm-cli
       - name: Smoke packed tarball
@@ -195,16 +204,17 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "24"
-          registry-url: https://registry.npmjs.org
-          cache: false
+          package-manager-cache: false
       - name: Use npm trusted publishing floor
         run: npm install -g "npm@>=11.5.1"
       - uses: actions/download-artifact@v4
         with:
           name: npm-package
           path: npm-dist
+      - name: Configure npm registry for trusted publishing
+        run: npm config set registry https://registry.npmjs.org
       - name: Publish @socraticlearn/cli to npm
         run: npm publish npm-dist/*.tgz --access public
