@@ -29,7 +29,7 @@ class BuildTests(unittest.TestCase):
         contents = dict(SOURCE_CONTENTS)
         contents["core/session-protocol.md"] += (
             "\n\n## Session record contract\n\n"
-            "# Session: YYYY-MM-DD — Topic\n"
+            "# Session: YYYY-MM-DD - Topic\n"
             "## Outcome\n"
             "## Diagnostic evidence\n"
             "## Learning route\n"

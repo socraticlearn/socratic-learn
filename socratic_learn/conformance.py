@@ -373,9 +373,13 @@ _CONTRACTS = (
             ("do not treat",),
             ("demonstrated evidence",),
             ("interrupted",),
+            ("prior_evidence_only",),
+            ("must_reestablish_current_state",),
+            ("cannot establish current demonstrated state",),
         ),
         "launcher resume sessions may treat interrupted attempts as demonstrated evidence",
-        "use supplied prior records on resume and never treat interrupted or "
+        "use supplied prior records on resume, honor prior_evidence_only and "
+        "must_reestablish_current_state, and never treat interrupted or "
         "no-checkpoint attempts as demonstrated evidence",
     ),
     _Contract(

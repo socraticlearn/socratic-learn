@@ -13,7 +13,13 @@ from unittest import mock
 
 from socratic_learn.errors import FilesystemError, IntegrityError, UsageError
 from socratic_learn.launcher import LaunchOptions, run_learning
-from socratic_learn.manifest import SESSION_HEADINGS
+from socratic_learn.manifest import (
+    SESSION_HEADINGS,
+    SESSION_TITLE_HEADING_PATTERN,
+    SESSION_TITLE_SUBJECT_FOCUS_RULE,
+    session_record_contract_payload,
+)
+from socratic_learn.threads import parse_session_record
 from socratic_learn.threads import (
     create_pending_encounter,
     create_thread,
@@ -36,7 +42,7 @@ def _valid_session_body(*, title: str, next_step: str) -> str:
         "## Next step": next_step,
         "## Sources": "No external sources were used.",
     }
-    lines = [f"# Session: {datetime.now(UTC):%Y-%m-%d} — {title}", ""]
+    lines = [f"# Session: {datetime.now(UTC):%Y-%m-%d} - {title}", ""]
     for heading in SESSION_HEADINGS:
         lines.extend([heading, sections[heading], ""])
     return "\n".join(lines)
@@ -1030,3 +1036,53 @@ class LauncherTests(unittest.TestCase):
             self.assertNotIn("here-only", seen[0])
             self.assertIn("here-only", seen[1])
             self.assertNotIn("personal-only", seen[1])
+
+    def test_launch_control_session_record_contract_matches_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            captured: list[list[str]] = []
+            run_learning(
+                LaunchOptions("logic", "pi", False, Path.cwd()),
+                output=io.StringIO(),
+                which={"pi": "pi"}.get,
+                run_process=lambda argv, **kwargs: (
+                    captured.append(argv) or CompletedProcess(argv, 0)
+                ),
+                environ={"SOCRATIC_LEARN_HOME": temporary},
+            )
+            contract = _control_from_argv(captured[0])["session_record_contract"]
+            self.assertEqual(session_record_contract_payload(), contract)
+            self.assertEqual(SESSION_TITLE_HEADING_PATTERN, contract["heading_pattern"])
+            self.assertEqual(SESSION_TITLE_SUBJECT_FOCUS_RULE, contract["title_rule"])
+            self.assertEqual(list(SESSION_HEADINGS), contract["section_headings"])
+
+    def test_valid_checkpoint_written_with_contract_heading_passes_parser(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            captured: list[list[str]] = []
+
+            def write_valid(argv, **_kwargs):
+                pending = _checkpoint_from_argv(argv)
+                captured.append(argv)
+                pending.write_text(
+                    _valid_session_body(
+                        title="Logic: Contract title",
+                        next_step="Apply once more.",
+                    ),
+                    encoding="utf-8",
+                )
+                return CompletedProcess(argv, 0)
+
+            run_learning(
+                LaunchOptions("logic", "pi", False, Path.cwd()),
+                output=io.StringIO(),
+                which={"pi": "pi"}.get,
+                run_process=write_valid,
+                environ={"SOCRATIC_LEARN_HOME": temporary},
+            )
+            pending = _checkpoint_from_argv(captured[0])
+            self.assertFalse(pending.exists())
+            parse_session_record(
+                _valid_session_body(
+                    title="Logic: Contract title",
+                    next_step="Apply once more.",
+                )
+            )

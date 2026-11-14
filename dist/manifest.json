@@ -1,7 +1,7 @@
 {
   "bundle": {
     "path": "socratic-learn.prompt.md",
-    "sha256": "2a876deef635beabc85af39735ee3bc86b89b9ed46adc5a346b621e3296fee2c"
+    "sha256": "8c5a828fa64181fff881052f1f75b11554617f394ae94061f89b2da445f01ce9"
   },
   "capability_fallbacks": {
     "cross_session_memory": "Ask for a prior summary and state what is unknown.",
@@ -72,7 +72,7 @@
     },
     {
       "path": "core/session-protocol.md",
-      "sha256": "bd724a3e238f2ac63ad86723e6524d061f50f7d46331ef368e117520969a5a83"
+      "sha256": "4a6faf5b482e4512872a3254cba385a49943fb1489923d98fba8400a59379fe8"
     },
     {
       "path": "core/assessment.md",

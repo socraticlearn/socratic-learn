@@ -255,43 +255,48 @@ README_LAUNCHER_REQUIREMENTS = (
     "pi, claude code, and antigravity",
     "cursor remains a project integration",
 )
-SESSION_PROTOCOL_LAUNCHER_REQUIREMENTS = (
-    "launcher supplies a checkpoint path",
-    "exactly one valid session record",
-    "at close",
+SESSION_PROTOCOL_PORTABLE_CLAUSES = (
+    "when the launcher supplies a checkpoint path, write exactly one valid session record to that path at close",
+    "after the learner confirms the outcome, set the title in the heading to",
     "<subject>: <specific focus>",
-    "supplied prior record",
-    "without a valid checkpoint",
-    "do not treat",
-    "demonstrated evidence",
-    "interrupted",
-    "checkpoint path",
-    "session control",
+    "when session control marks `prior_complete_encounter_role` as `prior_evidence_only`",
+    "or sets `must_reestablish_current_state` after an interrupted launch",
+    "cannot establish current demonstrated state until the learner completes that retrieval successfully",
+    "do not treat an interrupted launch or a session that ended without a valid checkpoint as demonstrated evidence",
+    "keep index paths, chunk paths, file-reading operations, protocol labels, checkpoint paths, session control payloads, encounter paths, and thread storage private",
 )
-README_PORTABLE_SESSION_REQUIREMENTS = (
+README_PORTABLE_SESSION_CLAUSES = (
     "new session",
     "view all",
-    "arrow",
-    "numbered",
-    "bypass",
+    "arrow keys",
+    "numbered list",
     "socratic read",
-    "learning thread",
+    "builds session control in memory",
+    "only thread metadata and structured checkpoint files persist",
+    "host chat logs are not used as session memory",
     "immutable",
-    "structured summaries",
-    "from provider chat history",
-    "provider ids",
-    "interrupted",
     "incomplete",
+    "provider ids",
 )
-LAUNCHER_SESSION_CONTROL_REQUIREMENTS = (
-    "session control",
-    "checkpoint_path",
-    "launch payload",
-    "prior_complete_encounter_path",
+LAUNCHER_SESSION_CONTROL_CLAUSES = (
+    "`checkpoint_path`",
+    "`session_record_contract`",
+    "`heading_pattern`",
+    "`section_headings`",
+    "`prior_complete_encounter_path`",
+    "`prior_complete_encounter_role`",
+    "`must_reestablish_current_state`",
     "host-independent",
     "structured session summaries",
+    "not provider chat history",
     "--- socratic learn session control (json) ---",
-    "socratic learn launch",
+    "--- socratic learn launch ---",
+)
+MANIFEST_REFERENCE_VERSION_CLAUSES = (
+    "`conformance.version` is integer `5`",
+    "`protocol_version`: exact protocol version `1.3.0`",
+    "require the exact current `conformance.version`",
+    "not silently treated as current",
 )
 NATIVE_RELEASE_CAVEAT = (
     "native installation is available only after github release v0.1.0 "
@@ -1448,17 +1453,15 @@ def validate(root: Path) -> list[str]:
             for requirement in README_LAUNCHER_REQUIREMENTS
         ):
             errors.append("README.md is missing public launcher onboarding")
-        if not all(
-            requirement in normalized_readme
-            for requirement in README_PORTABLE_SESSION_REQUIREMENTS
-        ):
-            errors.append("README.md is missing portable session memory guidance")
         quick_start = readme_text.split("## Quick start", 1)
         quick_start_text = (
             quick_start[1].split("## Choose an AI host", 1)[0]
             if len(quick_start) == 2
             else ""
         )
+        normalized_quick = normalize(quick_start_text).lower()
+        if not all(clause in normalized_quick for clause in README_PORTABLE_SESSION_CLAUSES):
+            errors.append("README.md is missing portable session memory guidance")
         order_positions = [
             quick_start_text.lower().find(marker)
             for marker in README_ONBOARDING_ORDER
@@ -1531,12 +1534,21 @@ def validate(root: Path) -> list[str]:
         protocol_text = normalize(
             session_protocol.read_text(encoding="utf-8")
         ).lower()
-        if not all(
-            requirement in protocol_text
-            for requirement in SESSION_PROTOCOL_LAUNCHER_REQUIREMENTS
-        ):
+        if not all(clause in protocol_text for clause in SESSION_PROTOCOL_PORTABLE_CLAUSES):
             errors.append(
                 "core/session-protocol.md is missing launcher checkpoint contracts"
+            )
+
+    manifest_reference = root / "docs/manifest-reference.md"
+    if manifest_reference.is_file():
+        manifest_text = normalize(
+            manifest_reference.read_text(encoding="utf-8")
+        ).lower()
+        if not all(
+            clause in manifest_text for clause in MANIFEST_REFERENCE_VERSION_CLAUSES
+        ):
+            errors.append(
+                "docs/manifest-reference.md is missing current version policy"
             )
 
     launcher_adapters = root / "docs/launcher-adapters.md"
@@ -1552,8 +1564,7 @@ def validate(root: Path) -> list[str]:
                 "docs/launcher-adapters.md is missing launcher adapter contracts"
             )
         if not all(
-            requirement in launcher_text
-            for requirement in LAUNCHER_SESSION_CONTROL_REQUIREMENTS
+            clause in launcher_text for clause in LAUNCHER_SESSION_CONTROL_CLAUSES
         ):
             errors.append(
                 "docs/launcher-adapters.md is missing session control contracts"

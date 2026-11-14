@@ -219,6 +219,12 @@ continue, repair a prerequisite, or revise the route. Record when the next
 evidence should be revisited as a date, a learner-owned milestone, or the next
 session; do not imply that a fixed interval suits every subject or learner.
 
+When session control marks `prior_complete_encounter_role` as `prior_evidence_only`
+or sets `must_reestablish_current_state` after an interrupted launch, use the
+older valid record to choose the opening retrieval task from a recorded gap. That
+prior record cannot establish current demonstrated state until the learner
+completes that retrieval successfully.
+
 If the learner states an available time budget, narrow the route scope without
 dropping the final learner application. Preview what can reasonably be completed,
 preserve one focused task per turn, and offer a plain-language progress
@@ -345,7 +351,7 @@ learner confirms the outcome, set the title in the heading to
 `<Subject>: <Specific focus>`.
 
 ```markdown
-# Session: YYYY-MM-DD — Subject: Specific focus
+# Session: YYYY-MM-DD - Subject: Specific focus
 ## Outcome
 ## Diagnostic evidence
 ## Learning route

@@ -10,7 +10,13 @@ from socratic_learn.conformance import (
     REQUIRED_DIAGNOSTIC_CODES,
 )
 from socratic_learn.errors import IntegrityError
-from socratic_learn.manifest import serialize_json, sha256_bytes, validate_manifest
+from socratic_learn.manifest import (
+    SESSION_TITLE_HEADING_PATTERN,
+    serialize_json,
+    session_record_contract_payload,
+    sha256_bytes,
+    validate_manifest,
+)
 
 
 SESSION_HEADINGS = (
@@ -61,7 +67,12 @@ def valid_manifest() -> dict[str, object]:
 class ManifestTests(unittest.TestCase):
     def test_public_contract_versions_are_exact(self) -> None:
         self.assertEqual("1.3.0", PROTOCOL_VERSION)
-        self.assertEqual(4, CONFORMANCE_CONTRACT_VERSION)
+        self.assertEqual(5, CONFORMANCE_CONTRACT_VERSION)
+
+    def test_session_record_contract_matches_parser_expectations(self) -> None:
+        contract = session_record_contract_payload()
+        self.assertEqual(SESSION_TITLE_HEADING_PATTERN, contract["heading_pattern"])
+        self.assertEqual(list(SESSION_HEADINGS), contract["section_headings"])
 
     def test_serialize_json_is_sorted_utf8_with_one_final_newline(self) -> None:
         result = serialize_json({"z": "café", "a": 1})

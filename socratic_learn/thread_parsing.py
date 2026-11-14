@@ -4,16 +4,23 @@ from __future__ import annotations
 
 import re
 
-from .manifest import SESSION_HEADINGS
+from .manifest import (
+    SESSION_HEADINGS,
+    SESSION_RECORD_CANONICAL_SEPARATOR,
+    SESSION_RECORD_LEGACY_SEPARATOR,
+)
 from .thread_schema import (
     ParsedSessionRecord,
     integrity,
     validate_calendar_date,
 )
 
-_EM_DASH = " — "
 _SESSION_HEADING_RE = re.compile(
-    r"^# Session: (\d{4}-\d{2}-\d{2})" + re.escape(_EM_DASH) + r"(.+)\s*$"
+    r"^# Session: (\d{4}-\d{2}-\d{2})(?:"
+    + re.escape(SESSION_RECORD_CANONICAL_SEPARATOR)
+    + "|"
+    + re.escape(SESSION_RECORD_LEGACY_SEPARATOR)
+    + r")(.+)\s*$"
 )
 
 

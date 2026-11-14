@@ -41,7 +41,7 @@ def _valid_session_body(*, title: str, next_step: str, session_date: str | None 
         "## Next step": next_step,
         "## Sources": "No external sources were used.",
     }
-    lines = [f"# Session: {today} — {title}", ""]
+    lines = [f"# Session: {today} - {title}", ""]
     for heading in SESSION_HEADINGS:
         lines.extend([heading, sections[heading], ""])
     return "\n".join(lines)
@@ -526,6 +526,14 @@ class ThreadStorageTests(unittest.TestCase):
             self.skipTest(f"directory symlinks unavailable: {error}")
         with self.assertRaises(IntegrityError):
             create_thread(records_link, goal="blocked")
+
+    def test_parse_session_record_accepts_legacy_em_dash_separator(self) -> None:
+        text = _valid_session_body(
+            title="Logic: Legacy title",
+            next_step="Review one gap.",
+        ).replace(" - Logic:", " — Logic:", 1)
+        record = parse_session_record(text)
+        self.assertEqual("Logic: Legacy title", record.refined_title)
 
     def test_parse_session_record_requires_subject_focus_title(self) -> None:
         parse_session_record(

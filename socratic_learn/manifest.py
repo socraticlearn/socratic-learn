@@ -24,6 +24,28 @@ SESSION_HEADINGS = (
     "## Sources",
 )
 
+SESSION_RECORD_CANONICAL_SEPARATOR = " - "
+SESSION_RECORD_LEGACY_SEPARATOR = " — "
+SESSION_TITLE_SUBJECT_FOCUS_RULE = "<Subject>: <Specific focus>"
+SESSION_TITLE_HEADING_PATTERN = (
+    f"# Session: YYYY-MM-DD{SESSION_RECORD_CANONICAL_SEPARATOR}"
+    f"{SESSION_TITLE_SUBJECT_FOCUS_RULE}"
+)
+
+
+def session_record_contract_payload() -> dict[str, object]:
+    """Launcher session-record contract accepted by the session parser."""
+
+    return {
+        "heading_pattern": SESSION_TITLE_HEADING_PATTERN,
+        "title_rule": SESSION_TITLE_SUBJECT_FOCUS_RULE,
+        "section_headings": list(SESSION_HEADINGS),
+        "instruction": (
+            "Write exactly one valid session record to checkpoint_path at close. "
+            "Use heading_pattern, title_rule, and section_headings in order."
+        ),
+    }
+
 CAPABILITY_FALLBACKS = {
     "cross_session_memory": "Ask for a prior summary and state what is unknown.",
     "diagram_rendering": "Use Mermaid if available or a textual edge list.",

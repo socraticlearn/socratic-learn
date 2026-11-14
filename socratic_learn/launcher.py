@@ -19,6 +19,7 @@ from .hosts import AgentName, DetectedHost, command_for, detect_hosts
 from .sources.ingest import ingest_source
 from .sources.model import SourceRequest
 from .sources.payload import build_source_study_payload
+from .manifest import session_record_contract_payload
 from .terminal_menu import MenuChoice, choose_menu_item
 from .threads import (
     ThreadRecord,
@@ -213,14 +214,7 @@ def _build_launch_payload(
         "mode": "resume" if is_resume else "new",
         "resume": resume,
         "schema_version": 1,
-        "session_record_contract": {
-            "heading": "# Session: YYYY-MM-DD — <concise descriptive title>",
-            "instruction": (
-                "Write the shared session record to the path supplied by the "
-                "top-level control field before ending. Keep the title specific "
-                "to this learning thread."
-            ),
-        },
+        "session_record_contract": session_record_contract_payload(),
         "thread": {
             "goal": thread.original_goal,
             "status": thread.status,

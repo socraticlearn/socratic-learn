@@ -1,4 +1,4 @@
-# Session: YYYY-MM-DD — Subject: Specific focus
+# Session: YYYY-MM-DD - Subject: Specific focus
 <!-- After the learner confirms the outcome, replace Subject and Specific focus
      with a concise <Subject>: <Specific focus> title. -->
 <!-- When the launcher supplies a checkpoint path, write exactly one valid record

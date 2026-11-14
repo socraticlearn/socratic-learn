@@ -50,7 +50,13 @@ The control object includes at least:
   `latest_launch_incomplete`, `must_reestablish_current_state`, and
   `saved_next_step` when resuming a stored thread.
 - `thread`: the learning goal, status, and display title for menu display.
-- `session_record_contract`: required headings and title guidance.
+- `session_record_contract`: `heading_pattern`, `title_rule`, ordered
+  `section_headings`, and close instructions. A compliant host must produce a
+  record that passes the launcher session parser. When
+  `prior_complete_encounter_role` is `prior_evidence_only` or
+  `must_reestablish_current_state` is true after an interrupted launch, resume
+  uses structured session summaries and `prior_complete_encounter_path`, not
+  provider chat history.
 
 Antigravity wraps the same launch payload after a JSON protocol-path prefix and
 a delimiter:

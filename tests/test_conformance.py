@@ -114,10 +114,13 @@ When prior progress exists, begin with one retrieval task from a recorded gap
 before introducing new material. When the launcher supplies a prior complete
 encounter and session record on resume, treat that supplied prior record as the
 authoritative progress evidence. Do not treat an interrupted launch or a session
-that ended without a valid checkpoint as demonstrated evidence. Record when the
-next evidence should be revisited. If the learner states an available time
-budget, narrow the route scope without dropping the final learner application
-and offer a plain-language progress checkpoint before time expires.
+that ended without a valid checkpoint as demonstrated evidence. When session
+control marks `prior_complete_encounter_role` as `prior_evidence_only` or sets
+`must_reestablish_current_state` after an interrupted launch, use the older valid
+record to choose the opening retrieval task from a recorded gap. That prior
+record cannot establish current demonstrated state until the learner completes
+that retrieval successfully. Record when the next evidence should be revisited.
+If the learner states an available time budget, narrow the route scope without dropping the final learner application and offer a plain-language progress checkpoint before time expires.
 
 ## 5. Close and persist
 

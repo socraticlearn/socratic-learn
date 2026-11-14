@@ -11,11 +11,13 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
+from socratic_learn.conformance import CONFORMANCE_CONTRACT_VERSION
 from tests.validate_repository import (
-    LAUNCHER_SESSION_CONTROL_REQUIREMENTS,
-    README_PORTABLE_SESSION_REQUIREMENTS,
+    LAUNCHER_SESSION_CONTROL_CLAUSES,
+    MANIFEST_REFERENCE_VERSION_CLAUSES,
+    README_PORTABLE_SESSION_CLAUSES,
     RUNTIME_PDF_DEPENDENCY,
-    SESSION_PROTOCOL_LAUNCHER_REQUIREMENTS,
+    SESSION_PROTOCOL_PORTABLE_CLAUSES,
     UNSAFE_INSTALLER_PATTERNS,
     main,
     normalize,
@@ -463,20 +465,13 @@ class RepositoryValidationTests(unittest.TestCase):
             (root / "docs/manifest-reference.md").read_text(encoding="utf-8")
         ).lower()
 
+        for clause in MANIFEST_REFERENCE_VERSION_CLAUSES:
+            with self.subTest(clause=clause):
+                self.assertIn(clause, text)
         for clause in (
-            "`protocol_version`: exact protocol version `1.2.0`",
-            "`conformance.version` is integer `3`",
             "silent orchestration",
-            "vocabulary readiness",
-            "connected perspectives",
-            "productive effort",
-            "graduated support",
-            "agent-led route",
-            "silent self-review",
-            "autonomous current-information research",
-            "source-study external-verification gate",
-            "source-aware closure",
-            "protocol `1.2.0`",
+            "launcher-checkpoint-close",
+            "launcher-resume-evidence-boundary",
         ):
             with self.subTest(clause=clause):
                 self.assertIn(clause, text)
@@ -1805,14 +1800,14 @@ class RepositoryValidationTests(unittest.TestCase):
         for source, text in placeholder_sources.items():
             with self.subTest(source=source, heading="placeholder H1"):
                 self.assertEqual(
-                    "# Session: YYYY-MM-DD — Topic",
+                    "# Session: YYYY-MM-DD - Subject: Specific focus",
                     text.strip().splitlines()[0],
                 )
 
         example_h1 = sources["example session"].splitlines()[0]
         self.assertRegex(
             example_h1,
-            r"^# Session: \d{4}-\d{2}-\d{2} — \S.*$",
+            r"^# Session: \d{4}-\d{2}-\d{2}(?: - | — )\S.*$",
         )
 
     def test_progress_template_preserves_required_headings(self) -> None:
@@ -3476,30 +3471,44 @@ class RepositoryValidationTests(unittest.TestCase):
 
 
 class PortableSessionMemoryDocumentationTests(unittest.TestCase):
-    def test_session_protocol_documents_launcher_checkpoint_contract(self) -> None:
+    def test_session_protocol_documents_launcher_checkpoint_clauses(self) -> None:
         root = Path(__file__).resolve().parents[1]
         text = normalize(
             (root / "core/session-protocol.md").read_text(encoding="utf-8")
         ).lower()
-        for phrase in SESSION_PROTOCOL_LAUNCHER_REQUIREMENTS:
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, text)
+        for clause in SESSION_PROTOCOL_PORTABLE_CLAUSES:
+            with self.subTest(clause=clause):
+                self.assertIn(clause, text)
 
-    def test_readme_documents_portable_session_memory(self) -> None:
+    def test_readme_quick_start_documents_portable_session_clauses(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        text = normalize((root / "README.md").read_text(encoding="utf-8")).lower()
-        for phrase in README_PORTABLE_SESSION_REQUIREMENTS:
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, text)
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        quick_start = readme.split("## Quick start", 1)[1].split(
+            "## Choose an AI host", 1
+        )[0]
+        text = normalize(quick_start).lower()
+        for clause in README_PORTABLE_SESSION_CLAUSES:
+            with self.subTest(clause=clause):
+                self.assertIn(clause, text)
 
-    def test_launcher_adapters_document_session_control_contract(self) -> None:
+    def test_launcher_adapters_document_session_control_clauses(self) -> None:
         root = Path(__file__).resolve().parents[1]
         text = normalize(
             (root / "docs/launcher-adapters.md").read_text(encoding="utf-8")
         ).lower()
-        for phrase in LAUNCHER_SESSION_CONTROL_REQUIREMENTS:
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, text)
+        for clause in LAUNCHER_SESSION_CONTROL_CLAUSES:
+            with self.subTest(clause=clause):
+                self.assertIn(clause, text)
+
+    def test_manifest_reference_requires_exact_conformance_version(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        text = normalize(
+            (root / "docs/manifest-reference.md").read_text(encoding="utf-8")
+        ).lower()
+        for clause in MANIFEST_REFERENCE_VERSION_CLAUSES:
+            with self.subTest(clause=clause):
+                self.assertIn(clause, text)
+        self.assertIn(f"integer `{CONFORMANCE_CONTRACT_VERSION}`", text)
 
     def test_repository_validator_enforces_portable_session_contracts(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -3510,8 +3519,61 @@ class PortableSessionMemoryDocumentationTests(unittest.TestCase):
             if "launcher checkpoint" in error
             or "portable session memory" in error
             or "session control contracts" in error
+            or "version policy" in error
         ]
         self.assertEqual([], blocking)
+
+    def test_validator_rejects_provider_chat_resume_claim(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        readme = root / "README.md"
+        text = readme.read_text(encoding="utf-8")
+        readme.write_text(
+            text.replace(
+                "Host chat logs are not used as session memory.",
+                "Host chat logs are used as session memory.",
+            ),
+            encoding="utf-8",
+        )
+        self.assertIn(
+            "README.md is missing portable session memory guidance",
+            validate(root),
+        )
+
+    def test_validator_rejects_session_control_disk_persistence_claim(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        readme = root / "README.md"
+        text = readme.read_text(encoding="utf-8")
+        readme.write_text(
+            text.replace(
+                "builds session control in memory",
+                "persists session control on disk",
+            ),
+            encoding="utf-8",
+        )
+        self.assertIn(
+            "README.md is missing portable session memory guidance",
+            validate(root),
+        )
+
+    def test_validator_rejects_interrupted_attempt_as_demonstrated_evidence(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        protocol = root / "core/session-protocol.md"
+        text = protocol.read_text(encoding="utf-8")
+        protocol.write_text(
+            text.replace(
+                "Do not treat an interrupted launch or a session that ended without a\n"
+                "valid checkpoint as demonstrated evidence.",
+                "Treat an interrupted launch as demonstrated evidence when a prior summary exists.",
+            ),
+            encoding="utf-8",
+        )
+        self.assertIn(
+            "core/session-protocol.md is missing launcher checkpoint contracts",
+            validate(root),
+        )
 
 
 if __name__ == "__main__":
