@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 import os
 import sys
+import unicodedata
 from typing import TextIO
 
 from .errors import UsageError
@@ -19,11 +20,22 @@ __all__ = (
     "decode_windows_scan_code",
     "format_menu_row",
     "read_interactive_key",
+    "read_posix_menu_key",
+    "resolve_posix_menu_key",
+    "terminal_display_width",
 )
 
 _POSIX_ESCAPE_TIMEOUT_SECONDS = 0.05
 _NUMBERED_INVALID_HINT = "Enter a number from 1 to {count} using digits only."
 _MENU_EOF_MESSAGE = "terminal menu input ended"
+_NOT_PROVIDED = object()
+
+
+class _TimedOut:
+    """Sentinel returned when a timed POSIX read finds no input."""
+
+
+_TIMED_OUT = _TimedOut()
 
 
 class KeyEvent(Enum):
@@ -60,6 +72,21 @@ def _reject_control_text(text: str, field: str) -> None:
                 f"menu choice {field} contains a control character",
                 remediation="remove CR, LF, and other terminal control characters",
             )
+
+
+def terminal_display_width(text: str) -> int:
+    """Return terminal column width using East Asian and combining-character rules."""
+    width = 0
+    for character in text:
+        category = unicodedata.category(character)
+        if category in {"Me", "Mn", "Mc", "Cf"}:
+            continue
+        east_asian = unicodedata.east_asian_width(character)
+        if east_asian in {"W", "F"}:
+            width += 2
+        else:
+            width += 1
+    return width
 
 
 def format_menu_row(choice: MenuChoice, *, selected: bool = False) -> str:
@@ -100,6 +127,34 @@ def decode_posix_escape_sequence(
     return KeyEvent.UNKNOWN
 
 
+def resolve_posix_menu_key(
+    first: str | None,
+    second: str | object = _NOT_PROVIDED,
+    third: str | object = _NOT_PROVIDED,
+) -> KeyEvent:
+    """Resolve POSIX key bytes, distinguishing timeout, EOF, and arrow sequences."""
+    if first is None:
+        return KeyEvent.EOF
+    if first == "\x03":
+        return KeyEvent.INTERRUPT
+    if first in {"\r", "\n"}:
+        return KeyEvent.ENTER
+    if first != "\x1b":
+        return KeyEvent.UNKNOWN
+
+    if second is _NOT_PROVIDED:
+        return KeyEvent.UNKNOWN
+    if second in {"timeout", "eof"}:
+        return KeyEvent.UNKNOWN
+    if second != "[":
+        return KeyEvent.UNKNOWN
+    if third is _NOT_PROVIDED:
+        return KeyEvent.UNKNOWN
+    if third in {"timeout", "eof"}:
+        return KeyEvent.UNKNOWN
+    return decode_posix_escape_sequence("\x1b", "[", str(third))
+
+
 def _validate_choices(choices: Sequence[MenuChoice]) -> None:
     if not choices:
         raise UsageError(
@@ -135,6 +190,8 @@ def _parse_canonical_choice_number(answer: str, maximum: int) -> int | None:
         return None
     if not answer.isdigit():
         return None
+    if len(answer) > len(str(maximum)):
+        return None
     if len(answer) > 1 and answer[0] == "0":
         return None
     index = int(answer)
@@ -159,7 +216,10 @@ def _read_numbered_answer(
     output.write(prompt)
     output.flush()
     if input_fn is not None:
-        return input_fn(prompt)
+        try:
+            return input_fn(prompt)
+        except EOFError:
+            _terminate_on_eof(output)
     line = input_stream.readline()
     if line == "":
         _terminate_on_eof(output)
@@ -198,10 +258,11 @@ def _redraw_interactive_row(
     *,
     previous_width: int,
 ) -> int:
-    padding = max(0, previous_width - len(row))
+    row_width = terminal_display_width(row)
+    padding = max(0, previous_width - row_width)
     output.write("\r" + row + (" " * padding))
     output.flush()
-    return len(row) + padding
+    return row_width + padding
 
 
 def _finalize_interactive_row(
@@ -210,7 +271,8 @@ def _finalize_interactive_row(
     *,
     previous_width: int,
 ) -> None:
-    padding = max(0, previous_width - len(row))
+    row_width = terminal_display_width(row)
+    padding = max(0, previous_width - row_width)
     output.write("\r" + row + (" " * padding) + "\n")
     output.flush()
 
@@ -245,16 +307,65 @@ def _choose_interactive(
             _terminate_on_eof(output)
 
 
-def _posix_read_byte(fd: int, *, timeout_seconds: float) -> str | None:
-    import select
-
-    ready, _, _ = select.select([fd], [], [], timeout_seconds)
-    if not ready:
-        return None
+def _posix_read_byte_blocking(fd: int) -> str | None:
     chunk = os.read(fd, 1)
     if not chunk:
         return None
     return chunk.decode("utf-8", errors="replace")
+
+
+def _posix_read_byte_timed(
+    fd: int,
+    *,
+    timeout_seconds: float,
+) -> str | None | _TimedOut:
+    import select
+
+    ready, _, _ = select.select([fd], [], [], timeout_seconds)
+    if not ready:
+        return _TIMED_OUT
+    chunk = os.read(fd, 1)
+    if not chunk:
+        return None
+    return chunk.decode("utf-8", errors="replace")
+
+
+def _continuation_marker(result: str | None | _TimedOut) -> str:
+    if result is _TIMED_OUT:
+        return "timeout"
+    if result is None:
+        return "eof"
+    return result
+
+
+def read_posix_menu_key(
+    fd: int,
+    *,
+    read_blocking: Callable[[int], str | None] | None = None,
+    read_timed: Callable[[int, float], str | None | _TimedOut] | None = None,
+) -> KeyEvent:
+    """Read one POSIX menu key; first byte blocks, escape continuations time out."""
+    blocking = read_blocking or _posix_read_byte_blocking
+    timed = read_timed or (
+        lambda descriptor, timeout: _posix_read_byte_timed(
+            descriptor,
+            timeout_seconds=timeout,
+        )
+    )
+    first = blocking(fd)
+    if first is None:
+        return resolve_posix_menu_key(None)
+    if first != "\x1b":
+        return resolve_posix_menu_key(first)
+    second = timed(fd, _POSIX_ESCAPE_TIMEOUT_SECONDS)
+    if not isinstance(second, str):
+        return resolve_posix_menu_key("\x1b", second=_continuation_marker(second))
+    if second != "[":
+        return resolve_posix_menu_key("\x1b", second=second)
+    third = timed(fd, _POSIX_ESCAPE_TIMEOUT_SECONDS)
+    if not isinstance(third, str):
+        return resolve_posix_menu_key("\x1b", second="[", third=_continuation_marker(third))
+    return resolve_posix_menu_key("\x1b", second="[", third=third)
 
 
 def read_interactive_key() -> KeyEvent:
@@ -283,26 +394,7 @@ def read_interactive_key() -> KeyEvent:
     previous = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
-        first = _posix_read_byte(fd, timeout_seconds=_POSIX_ESCAPE_TIMEOUT_SECONDS)
-        if first is None:
-            return KeyEvent.UNKNOWN
-        if first == "":
-            return KeyEvent.EOF
-        if first == "\x03":
-            return KeyEvent.INTERRUPT
-        if first in {"\r", "\n"}:
-            return KeyEvent.ENTER
-        if first != "\x1b":
-            return KeyEvent.UNKNOWN
-        second = _posix_read_byte(fd, timeout_seconds=_POSIX_ESCAPE_TIMEOUT_SECONDS)
-        if second is None:
-            return decode_posix_escape_sequence("\x1b", None, None)
-        third = (
-            _posix_read_byte(fd, timeout_seconds=_POSIX_ESCAPE_TIMEOUT_SECONDS)
-            if second == "["
-            else None
-        )
-        return decode_posix_escape_sequence("\x1b", second, third)
+        return read_posix_menu_key(fd)
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, previous)
 

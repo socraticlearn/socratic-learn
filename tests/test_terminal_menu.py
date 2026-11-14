@@ -4,6 +4,7 @@ import io
 import re
 import unittest
 from collections.abc import Iterator
+from unittest.mock import Mock
 
 from socratic_learn.errors import UsageError
 from socratic_learn.terminal_menu import (
@@ -12,6 +13,10 @@ from socratic_learn.terminal_menu import (
     choose_menu_item,
     decode_posix_escape_sequence,
     decode_windows_scan_code,
+    format_menu_row,
+    read_posix_menu_key,
+    resolve_posix_menu_key,
+    terminal_display_width,
 )
 
 
@@ -111,6 +116,39 @@ class TerminalMenuTests(unittest.TestCase):
         )
         self.assertEqual("only", result)
         self.assertIn("Enter the number of your choice:", output.getvalue())
+
+    def test_numbered_fallback_rejects_oversized_digit_strings(self) -> None:
+        choices = (
+            MenuChoice("a", "Alpha"),
+            MenuChoice("b", "Beta"),
+        )
+        answers = iter(["9999999999999999999999", "2"])
+        output = io.StringIO()
+
+        result = choose_menu_item(
+            choices,
+            output=output,
+            is_interactive=lambda: False,
+            input_fn=lambda prompt: next(answers),
+        )
+        self.assertEqual("b", result)
+        self.assertIn("digits only", output.getvalue())
+
+    def test_numbered_input_fn_eof_flushes_before_re_raise(self) -> None:
+        choices = (MenuChoice("only", "Only"),)
+        output = io.StringIO()
+
+        def raise_eof(prompt: str) -> str:
+            raise EOFError("injected eof")
+
+        with self.assertRaises(EOFError):
+            choose_menu_item(
+                choices,
+                output=output,
+                is_interactive=lambda: False,
+                input_fn=raise_eof,
+            )
+        self.assertTrue(output.getvalue().endswith("\n"))
 
     def test_numbered_fallback_eof_raises_after_newline_flush(self) -> None:
         choices = (MenuChoice("only", "Only"),)
@@ -214,6 +252,27 @@ class TerminalMenuTests(unittest.TestCase):
         )
         self.assertEqual("c", up_result)
 
+    def test_interactive_redraw_uses_display_width_for_wide_characters(self) -> None:
+        choices = (
+            MenuChoice("wide", "数学数学", "次の一歩"),
+            MenuChoice("short", "Tiny"),
+        )
+        keys: Iterator[KeyEvent] = iter([KeyEvent.DOWN, KeyEvent.ENTER])
+        output = io.StringIO()
+        choose_menu_item(
+            choices,
+            output=output,
+            is_interactive=lambda: True,
+            read_key=lambda: next(keys),
+        )
+        wide_width = terminal_display_width(format_menu_row(choices[0], selected=True))
+        tiny_width = terminal_display_width(format_menu_row(choices[1], selected=True))
+        self.assertGreater(wide_width, tiny_width)
+        final_row = [part for part in output.getvalue().replace("\r", "\n").split("\n") if part.strip()][
+            -1
+        ]
+        self.assertGreater(len(final_row), tiny_width)
+
     def test_interactive_redraw_erases_longer_previous_row(self) -> None:
         choices = (
             MenuChoice(
@@ -298,6 +357,16 @@ class TerminalMenuTests(unittest.TestCase):
         )
 
 
+class DisplayWidthTests(unittest.TestCase):
+    def test_counts_east_asian_wide_characters(self) -> None:
+        self.assertEqual(4, terminal_display_width("数学"))
+        self.assertGreater(terminal_display_width("> 数学 🎓"), terminal_display_width("> ab"))
+
+    def test_ignores_combining_and_format_characters(self) -> None:
+        self.assertEqual(1, terminal_display_width("e\u0301"))
+        self.assertEqual(1, terminal_display_width("a\u200d"))
+
+
 class NativeKeyParsingTests(unittest.TestCase):
     def test_windows_unknown_scan_code_maps_to_unknown(self) -> None:
         self.assertEqual(KeyEvent.UNKNOWN, decode_windows_scan_code(75))
@@ -333,6 +402,41 @@ class NativeKeyParsingTests(unittest.TestCase):
             KeyEvent.UNKNOWN,
             decode_posix_escape_sequence("\x1b", "[", "C"),
         )
+
+    def test_posix_resolver_eof_on_missing_first_byte(self) -> None:
+        self.assertEqual(KeyEvent.EOF, resolve_posix_menu_key(None))
+
+    def test_posix_resolver_timeout_after_escape_is_unknown_not_eof(self) -> None:
+        self.assertEqual(
+            KeyEvent.UNKNOWN,
+            resolve_posix_menu_key("\x1b", second="timeout"),
+        )
+
+    def test_posix_resolver_eof_on_continuation_after_escape_is_unknown(self) -> None:
+        self.assertEqual(
+            KeyEvent.UNKNOWN,
+            resolve_posix_menu_key("\x1b", second="eof"),
+        )
+
+    def test_posix_first_byte_blocks_without_timed_read(self) -> None:
+        timed = Mock(side_effect=AssertionError("timed read"))
+        blocking = Mock(return_value="\n")
+        self.assertEqual(
+            KeyEvent.ENTER,
+            read_posix_menu_key(0, read_blocking=blocking, read_timed=timed),
+        )
+        blocking.assert_called_once()
+        timed.assert_not_called()
+
+    def test_posix_escape_uses_timed_reads_only_for_continuations(self) -> None:
+        timed = Mock(side_effect=["timeout"])
+        blocking = Mock(return_value="\x1b")
+        self.assertEqual(
+            KeyEvent.UNKNOWN,
+            read_posix_menu_key(0, read_blocking=blocking, read_timed=timed),
+        )
+        blocking.assert_called_once()
+        timed.assert_called_once()
 
 
 if __name__ == "__main__":
