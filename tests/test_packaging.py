@@ -20,10 +20,18 @@ class PackagingTests(unittest.TestCase):
             project["project"]["dependencies"],
         )
 
-    def test_native_spec_collects_pypdf(self) -> None:
+    def test_build_dependencies_exclude_pyinstaller(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        text = (root / "socratic-learn.spec").read_text("utf-8")
-        self.assertIn('collect_submodules("pypdf")', text)
+        project = tomllib.loads((root / "pyproject.toml").read_text("utf-8"))
+
+        build_dependencies = project["project"]["optional-dependencies"]["build"]
+
+        self.assertFalse(
+            any(
+                "pyinstaller" in dependency.lower()
+                for dependency in build_dependencies
+            )
+        )
 
     def test_minimal_text_pdf_fixture_is_readable(self) -> None:
         from pypdf import PdfReader

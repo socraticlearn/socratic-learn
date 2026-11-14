@@ -33,6 +33,8 @@ class UniversalSmokeTests(unittest.TestCase):
                 continue
             relative = raw_relative.decode("utf-8")
             source = root / relative
+            if not source.is_file():
+                continue
             target = destination / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)

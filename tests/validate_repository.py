@@ -74,12 +74,16 @@ REQUIRED_PATHS = (
     "docs/superpowers/plans/2026-11-05-socratic-learn-rename.md",
     ".github/workflows/native-python.yml",
     "pyproject.toml",
-    "release-manifest.schema.json",
-    "socratic-learn.spec",
-    "scripts/install.ps1",
-    "scripts/install.sh",
     ".github/workflows/release.yml",
     "docs/superpowers/plans/2026-11-06-one-command-learning-launcher.md",
+)
+RETIRED_NATIVE_RELEASE_TERMS = (
+    "pyinstaller",
+    "socratic-learn.spec",
+    "release-manifest.schema.json",
+    "scripts/install.ps1",
+    "scripts/install.sh",
+    "socratic_learn.release",
 )
 SKILL_PATHS = (
     ".cursor/skills/socratic-learn/SKILL.md",
@@ -188,11 +192,6 @@ README_RUNTIME_REQUIREMENTS = (
 WHEEL_READ_SMOKE_MARKERS = (
     "tests.read_smoke",
     "run_wheel_read_smoke",
-    "socratic read --agent pi",
-    "minimal-text.pdf",
-)
-FROZEN_READ_SMOKE_MARKERS = (
-    "run_frozen_read_smoke",
     "socratic read --agent pi",
     "minimal-text.pdf",
 )
@@ -1388,6 +1387,13 @@ def validate_release_automation(root: Path) -> list[str]:
     pyproject = root / "pyproject.toml"
     if pyproject.is_file():
         pyproject_text = pyproject.read_text(encoding="utf-8")
+        pyproject_lower = pyproject_text.lower()
+        for term in RETIRED_NATIVE_RELEASE_TERMS:
+            if term in pyproject_lower:
+                errors.append(
+                    "pyproject.toml must not reference retired native "
+                    f"distribution term: {term}"
+                )
         if 'socratic = "socratic_learn.cli:entry_point"' not in pyproject_text:
             errors.append("pyproject.toml must map the socratic console entry point")
         try:
@@ -1402,31 +1408,16 @@ def validate_release_automation(root: Path) -> list[str]:
                     f"{RUNTIME_PDF_DEPENDENCY} as the runtime dependency"
                 )
 
-    spec = root / "socratic-learn.spec"
-    if spec.is_file():
-        spec_text = spec.read_text(encoding="utf-8")
-        required_spec_terms = (
-            'collect_submodules("pypdf")',
-            "socratic_learn",
-            "learning_tutor",
-            "socratic_learn/data",
-            "manifest.json",
-            "socratic-learn.prompt.md",
-            "learner-profile.md",
-            "learning-goal.md",
-            "progress.md",
-            "session-log.md",
-            'name="socratic"',
-            "console=True",
-            '"git", "diff", "--exit-code"',
-            '"git", "status", "--porcelain"',
-        )
-        if not all(term in spec_text for term in required_spec_terms):
-            errors.append("PyInstaller spec does not preserve the native build contract")
-
     release_path = root / ".github/workflows/release.yml"
     if release_path.is_file():
         release = release_path.read_text(encoding="utf-8")
+        release_lower = release.lower()
+        for term in RETIRED_NATIVE_RELEASE_TERMS:
+            if term in release_lower:
+                errors.append(
+                    ".github/workflows/release.yml must not reference retired "
+                    f"native distribution term: {term}"
+                )
         if "permissions:\n  contents: read" not in release:
             errors.append("Release workflow must default to contents: read")
         if release.count("contents: write") != 1:
@@ -1436,13 +1427,13 @@ def validate_release_automation(root: Path) -> list[str]:
         required_release_terms = (
             'tags: ["v*"]',
             "workflow_dispatch:",
-            "windows-latest",
             "ubuntu-latest",
             "actions/download-artifact@v4",
-            "hashlib.sha256",
-            "release-manifest.schema.json",
-            "scripts/install.ps1",
-            "scripts/install.sh",
+            "python -m unittest discover",
+            "python tests/validate_repository.py",
+            "run_wheel_read_smoke",
+            "gh release create",
+            "pypa/gh-action-pypi-publish@release/v1",
         )
         if not all(term in release for term in required_release_terms):
             errors.append("Release workflow is missing required triggers or artifacts")
@@ -1478,74 +1469,6 @@ def validate_release_automation(root: Path) -> list[str]:
                 "must add the checkout to sys.path before import"
             )
 
-        native = workflow_job(release, "native")
-        macos_entries = [
-            entry
-            for entry in workflow_matrix_include_entries(native)
-            if entry.get("platform") == "macos"
-        ]
-        macos_matrix_valid = macos_entries == [
-            {
-                "os": "macos-15-intel",
-                "platform": "macos",
-                "extension": "",
-            }
-        ]
-        if not macos_matrix_valid:
-            errors.append(
-                "Native macOS release matrix must use macos-15-intel "
-                "with an empty extension"
-            )
-
-        rename_step = workflow_step(
-            native,
-            "Rename and smoke test frozen socratic read",
-        )
-        rename_valid = workflow_python_assignment_matches(
-            rename_step,
-            "destination",
-            'root / "native-artifacts" / ('
-            'f"socratic-{os.environ[\'RELEASE_PLATFORM\']}-x86_64" '
-            'f"{os.environ[\'RELEASE_EXTENSION\']}"'
-            ")",
-        )
-        upload_step = workflow_action_step(native, "actions/upload-artifact@v4")
-        upload_valid = workflow_action_input(upload_step, "path") == (
-            "native-artifacts/socratic-${{ matrix.platform }}"
-            "-x86_64${{ matrix.extension }}"
-        )
-        if not rename_valid or not upload_valid:
-            errors.append(
-                "Native rename and upload steps must produce x86_64 artifacts"
-            )
-
-        suite = "python -m unittest discover"
-        pyinstaller = "python -m PyInstaller socratic-learn.spec"
-        if (
-            not native
-            or suite not in native
-            or pyinstaller not in native
-            or native.index(suite) > native.index(pyinstaller)
-            or "python tests/validate_repository.py" not in native
-            or "run_frozen_read_smoke" not in native
-        ):
-            errors.append(
-                "Every native release build must test and validate before PyInstaller"
-            )
-
-        manifest = workflow_job(release, "manifest")
-        if (
-            "actions/download-artifact@v4" not in manifest
-            or "hashlib.sha256" not in manifest
-            or manifest.index("actions/download-artifact@v4")
-            > manifest.index("hashlib.sha256")
-            or "path.stat().st_size" not in manifest
-            or "separator = '  '" not in manifest
-        ):
-            errors.append(
-                "Release manifest must hash downloaded native artifacts and use two spaces"
-            )
-
         publish_gate = (
             "if: github.event_name == 'push' && "
             "startsWith(github.ref, 'refs/tags/v')"
@@ -1567,9 +1490,9 @@ def validate_release_automation(root: Path) -> list[str]:
             or "pypa/gh-action-pypi-publish@release/v1" not in pypi_publish
         ):
             errors.append("PyPI publishing must use tag-only trusted publishing")
-        if "needs: [python-package, native, manifest]" not in pypi_publish:
+        if "needs: python-package" not in pypi_publish:
             errors.append(
-                "PyPI publishing must wait for package, native, and manifest jobs"
+                "PyPI publishing must wait for the Python package job"
             )
 
         version_job = workflow_job(release, "verify-version")
@@ -1590,7 +1513,7 @@ def validate_release_automation(root: Path) -> list[str]:
         (release_path, "Release workflow")
         if release_path.is_file()
         else None,
-        (normal_path, "Native safety matrix")
+        (normal_path, "Python safety matrix")
         if normal_path.is_file()
         else None,
     )
@@ -1612,19 +1535,8 @@ def validate_release_automation(root: Path) -> list[str]:
                 errors.append(
                     f"{label} must not rely on interpreter-only PdfReader smoke"
                 )
-    release_path = root / ".github/workflows/release.yml"
     if release_path.is_file():
         release = release_path.read_text(encoding="utf-8")
-        native = workflow_job(release, "native")
-        if native and not all(marker in native for marker in FROZEN_READ_SMOKE_MARKERS):
-            errors.append(
-                "Native release builds must smoke-test frozen socratic read with fake hosts"
-            )
-        if any(marker in native for marker in INTERPRETER_ONLY_PDF_SMOKE_MARKERS):
-            if "run_frozen_read_smoke" not in native:
-                errors.append(
-                    "Native release builds must not rely on interpreter-only PdfReader smoke"
-                )
         python_package = workflow_job(release, "python-package")
         if python_package and not all(
             marker in python_package for marker in WHEEL_READ_SMOKE_MARKERS
@@ -1641,13 +1553,11 @@ def validate_release_automation(root: Path) -> list[str]:
             or suite not in normal
             or normal.index(install) > normal.index(suite)
         ):
-            errors.append("Native safety matrix must install .[build] before tests")
+            errors.append("Python safety matrix must install .[build] before tests")
         if "python -m build --wheel" not in normal or "run_wheel_read_smoke" not in normal:
             errors.append(
-                "Native safety matrix must build and smoke-test an installed wheel"
+                "Python safety matrix must build and smoke-test an installed wheel"
             )
-        if "PyInstaller" in normal:
-            errors.append("Native safety matrix must not run PyInstaller")
     return errors
 
 

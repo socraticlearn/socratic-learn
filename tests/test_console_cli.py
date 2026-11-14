@@ -62,12 +62,15 @@ class ConsoleCliTests(unittest.TestCase):
         )
 
     @mock.patch("socratic_learn.cli.administrative_main", return_value=7)
-    def test_admin_command_is_forwarded_unchanged(
+    def test_project_adapter_install_is_forwarded_unchanged(
         self,
         admin: mock.Mock,
     ) -> None:
-        self.assertEqual(7, main(["doctor", "project"]))
-        admin.assert_called_once_with(["doctor", "project"])
+        arguments = ["install", "TARGET", "PROJECT", "--update"]
+
+        self.assertEqual(7, main(arguments))
+
+        admin.assert_called_once_with(arguments)
         self.write_banner.assert_not_called()
 
     @mock.patch("socratic_learn.cli.run_learning", return_value=0)
@@ -98,70 +101,41 @@ class ConsoleCliTests(unittest.TestCase):
             LaunchOptions("matrix proofs", "claude", False, Path.cwd())
         )
 
-    @mock.patch("socratic_learn.cli.administrative_main")
-    @mock.patch("socratic_learn.cli.update_installation", return_value=6)
-    def test_update_routes_to_self_management_only(
-        self,
-        update: mock.Mock,
-        admin: mock.Mock,
-    ) -> None:
-        home = Path("C:/managed-home")
-        with mock.patch("socratic_learn.cli.launcher_home", return_value=home):
-            self.assertEqual(6, main(["update"]))
-
-        update.assert_called_once_with(home, mock.ANY)
-        admin.assert_not_called()
-        self.write_banner.assert_not_called()
-
-    @mock.patch("socratic_learn.cli.administrative_main")
-    @mock.patch("socratic_learn.cli.uninstall", return_value=7)
-    def test_uninstall_routes_flags_to_self_management_only(
-        self,
-        remove: mock.Mock,
-        admin: mock.Mock,
-    ) -> None:
-        home = Path("C:/managed-home")
-        with mock.patch("socratic_learn.cli.launcher_home", return_value=home):
-            self.assertEqual(
-                7,
-                main(["uninstall", "--delete-data", "--yes"]),
-            )
-
-        remove.assert_called_once_with(
-            home,
-            executable=mock.ANY,
-            delete_data=True,
-            confirm=mock.ANY,
-            yes=True,
-        )
-        admin.assert_not_called()
-        self.write_banner.assert_not_called()
-
-    @mock.patch("socratic_learn.cli.uninstall")
-    def test_yes_without_delete_data_is_rejected_before_uninstall(
-        self,
-        remove: mock.Mock,
-    ) -> None:
-        stderr = io.StringIO()
-
-        with contextlib.redirect_stderr(stderr):
-            exit_code = main(["uninstall", "--yes"])
-
-        self.assertEqual(2, exit_code)
-        self.assertIn("--yes", stderr.getvalue())
-        remove.assert_not_called()
-        self.write_banner.assert_not_called()
-
     @mock.patch("socratic_learn.cli.run_learning", return_value=0)
-    def test_explicit_learn_allows_self_management_word_as_goal(
+    def test_bare_update_is_a_learning_goal(
         self,
         run: mock.Mock,
     ) -> None:
-        self.assertEqual(0, main(["learn", "uninstall"]))
+        self.assertEqual(0, main(["update"]))
+        self.assert_banner_written_once()
+        run.assert_called_once_with(
+            LaunchOptions("update", None, False, Path.cwd())
+        )
+
+    @mock.patch("socratic_learn.cli.run_learning", return_value=0)
+    def test_bare_uninstall_is_a_learning_goal(
+        self,
+        run: mock.Mock,
+    ) -> None:
+        self.assertEqual(0, main(["uninstall"]))
         self.assert_banner_written_once()
         run.assert_called_once_with(
             LaunchOptions("uninstall", None, False, Path.cwd())
         )
+
+    @mock.patch("socratic_learn.cli.run_learning", return_value=0)
+    def test_explicit_learn_allows_retired_self_management_words_as_goals(
+        self,
+        run: mock.Mock,
+    ) -> None:
+        for goal in ("update", "uninstall"):
+            with self.subTest(goal=goal):
+                self.assertEqual(0, main(["learn", goal]))
+                run.assert_called_once_with(
+                    LaunchOptions(goal, None, False, Path.cwd())
+                )
+                run.reset_mock()
+                self.write_banner.reset_mock()
 
     @mock.patch("socratic_learn.cli.run_learning")
     def test_launcher_rejects_abbreviated_agent_option(
@@ -199,6 +173,8 @@ class ConsoleCliTests(unittest.TestCase):
             "Examples:",
         ):
             self.assertIn(expected, help_text)
+        self.assertNotIn("Self-management commands:", help_text)
+        self.assertNotIn("--delete-data", help_text)
         self.write_banner.assert_not_called()
 
     def test_version_prints_distribution_version(self) -> None:

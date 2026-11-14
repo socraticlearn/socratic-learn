@@ -66,12 +66,16 @@ UNIVERSAL_REQUIRED_PATHS = (
 )
 RELEASE_REQUIRED_PATHS = (
     "pyproject.toml",
-    "release-manifest.schema.json",
-    "socratic-learn.spec",
-    "scripts/install.ps1",
-    "scripts/install.sh",
     ".github/workflows/release.yml",
     "docs/superpowers/plans/2026-11-06-one-command-learning-launcher.md",
+)
+RETIRED_NATIVE_RELEASE_TERMS = (
+    "pyinstaller",
+    "socratic-learn.spec",
+    "release-manifest.schema.json",
+    "scripts/install.ps1",
+    "scripts/install.sh",
+    "socratic_learn.release",
 )
 
 CURRICULUM_FIELDS = (
@@ -243,6 +247,8 @@ class RepositoryValidationTests(unittest.TestCase):
                 continue
             relative = raw_relative.decode("utf-8")
             source = source_root / relative
+            if not source.is_file():
+                continue
             target = destination / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
@@ -1984,7 +1990,7 @@ class RepositoryValidationTests(unittest.TestCase):
             with self.subTest(path=relative):
                 self.assertIn(f"Missing required path: {relative}", errors)
 
-    def test_native_release_automation_contract(self) -> None:
+    def test_python_package_release_automation_contract(self) -> None:
         root = Path(__file__).resolve().parents[1]
         for relative in RELEASE_REQUIRED_PATHS:
             with self.subTest(path=relative):
@@ -1997,53 +2003,37 @@ class RepositoryValidationTests(unittest.TestCase):
         )
         self.assertIn(RUNTIME_PDF_DEPENDENCY, pyproject)
 
-        spec = (root / "socratic-learn.spec").read_text(encoding="utf-8")
-        self.assertIn('collect_submodules("pypdf")', spec)
-
         release = (root / ".github/workflows/release.yml").read_text(
             encoding="utf-8"
         )
         for value in (
             'tags: ["v*"]',
             "workflow_dispatch:",
-            "windows-latest",
             "ubuntu-latest",
-            "macos-15-intel",
             "python-version: \"3.11\"",
             "python -m unittest discover",
             "python tests/validate_repository.py",
-            "python -m PyInstaller socratic-learn.spec",
             "run_wheel_read_smoke",
-            "run_frozen_read_smoke",
             "actions/download-artifact@v4",
-            "hashlib.sha256",
-            "release-manifest.schema.json",
-            "'  '",
+            "gh release create",
             "pypa/gh-action-pypi-publish@release/v1",
             "environment: pypi",
             "id-token: write",
             "contents: write",
-            "scripts/install.ps1",
-            "scripts/install.sh",
         ):
             with self.subTest(value=value):
                 self.assertIn(value, release)
-        self.assertLess(
-            release.index("python -m unittest discover"),
-            release.index("python -m PyInstaller socratic-learn.spec"),
-        )
         publish_gate = (
             "if: github.event_name == 'push' && "
             "startsWith(github.ref, 'refs/tags/v')"
         )
         self.assertEqual(2, release.count(publish_gate))
         pypi = release.split("  publish-pypi:", 1)[1]
-        self.assertIn("needs: [python-package, native, manifest]", pypi)
+        self.assertIn("needs: python-package", pypi)
         self.assertIn("permissions:\n  contents: read", release)
         self.assertEqual(1, release.count("contents: write"))
         self.assertIn("github.ref_name", release)
         self.assertIn("__version__", release)
-        self.assertNotIn("macos-13", release)
 
         normal = (root / ".github/workflows/native-python.yml").read_text(
             encoding="utf-8"
@@ -2066,10 +2056,42 @@ class RepositoryValidationTests(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertIn(marker, release)
                 self.assertIn(marker, normal)
-        for marker in ("run_frozen_read_smoke",):
-            with self.subTest(marker=marker):
-                self.assertIn(marker, release)
         self.assertNotIn("from pypdf import PdfReader", normal)
+
+    def test_active_release_files_exclude_retired_native_terms(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        active_files = (
+            root / ".github/workflows/release.yml",
+            root / "pyproject.toml",
+        )
+
+        for path in active_files:
+            text = path.read_text(encoding="utf-8").lower()
+            for term in RETIRED_NATIVE_RELEASE_TERMS:
+                with self.subTest(path=path.name, term=term):
+                    self.assertNotIn(term, text)
+
+    def test_validator_rejects_retired_native_terms_in_active_release_files(
+        self,
+    ) -> None:
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+
+        for relative in (".github/workflows/release.yml", "pyproject.toml"):
+            path = root / relative
+            original = path.read_text(encoding="utf-8")
+            for term in RETIRED_NATIVE_RELEASE_TERMS:
+                with self.subTest(path=relative, term=term):
+                    path.write_text(
+                        original + f"\n# retired channel: {term}\n",
+                        encoding="utf-8",
+                    )
+                    self.assertIn(
+                        f"{relative} must not reference retired native "
+                        f"distribution term: {term}",
+                        validate(root),
+                    )
+            path.write_text(original, encoding="utf-8")
 
     def test_pyproject_runtime_dependency_is_validated(self) -> None:
         temp, root = self.make_root()
@@ -2100,28 +2122,6 @@ class RepositoryValidationTests(unittest.TestCase):
         errors = validate(root)
         self.assertTrue(
             any("smoke-test installed socratic read" in error for error in errors),
-            errors,
-        )
-
-    def test_native_release_job_rejects_version_only_frozen_smoke(self) -> None:
-        temp, root = self.make_root()
-        self.addCleanup(temp.cleanup)
-        source_root = Path(__file__).resolve().parents[1]
-        release = root / ".github/workflows/release.yml"
-        shutil.copy2(source_root / ".github/workflows/release.yml", release)
-        release.write_text(
-            release.read_text(encoding="utf-8")
-            .replace("from tests.read_smoke import run_frozen_read_smoke", "")
-            .replace(
-                "run_frozen_read_smoke(destination.resolve(), root)",
-                'subprocess.run([str(destination.resolve()), "--version"], check=True)',
-            ),
-            encoding="utf-8",
-        )
-
-        errors = validate(root)
-        self.assertTrue(
-            any("frozen socratic read" in error for error in errors),
             errors,
         )
 
@@ -2225,132 +2225,7 @@ class RepositoryValidationTests(unittest.TestCase):
 
         self.assertIn("Release workflow must default to contents: read", errors)
         self.assertIn(
-            "Native safety matrix must install .[build] before tests",
-            errors,
-        )
-
-    def test_release_workflow_rejects_retired_macos_intel_runner(self) -> None:
-        temp, root = self.make_root()
-        self.addCleanup(temp.cleanup)
-        release = root / ".github/workflows/release.yml"
-        release.write_text(
-            release.read_text(encoding="utf-8").replace(
-                "macos-15-intel",
-                "macos-13",
-                1,
-            ),
-            encoding="utf-8",
-        )
-
-        errors = validate(root)
-
-        self.assertIn(
-            "Native macOS release matrix must use macos-15-intel "
-            "with an empty extension",
-            errors,
-        )
-
-    def test_release_workflow_rejects_arm_macos_runner_with_comment_decoy(
-        self,
-    ) -> None:
-        temp, root = self.make_root()
-        self.addCleanup(temp.cleanup)
-        release = root / ".github/workflows/release.yml"
-        release.write_text(
-            release.read_text(encoding="utf-8").replace(
-                "          - os: macos-15-intel\n"
-                "            platform: macos\n",
-                "          - os: macos-15  # macos-15-intel\n"
-                "            platform: macos\n",
-                1,
-            ),
-            encoding="utf-8",
-        )
-
-        errors = validate(root)
-
-        self.assertIn(
-            "Native macOS release matrix must use macos-15-intel "
-            "with an empty extension",
-            errors,
-        )
-
-    def test_release_workflow_rejects_arm_macos_runner_with_matrix_decoy(
-        self,
-    ) -> None:
-        temp, root = self.make_root()
-        self.addCleanup(temp.cleanup)
-        release = root / ".github/workflows/release.yml"
-        text = release.read_text(encoding="utf-8").replace(
-            "          - os: macos-15-intel\n"
-            "            platform: macos\n",
-            "          - os: macos-15\n"
-            "            platform: macos\n",
-            1,
-        )
-        text = text.replace(
-            "          - os: windows-latest\n",
-            "          - os: macos-15-intel\n"
-            "            platform: decoy\n"
-            '            extension: ""\n'
-            "          - os: windows-latest\n",
-            1,
-        )
-        release.write_text(text, encoding="utf-8")
-
-        errors = validate(root)
-
-        self.assertIn(
-            "Native macOS release matrix must use macos-15-intel "
-            "with an empty extension",
-            errors,
-        )
-
-    def test_release_workflow_rejects_arm64_rename_with_comment_decoy(
-        self,
-    ) -> None:
-        temp, root = self.make_root()
-        self.addCleanup(temp.cleanup)
-        release = root / ".github/workflows/release.yml"
-        expected = "f\"socratic-{os.environ['RELEASE_PLATFORM']}-x86_64\""
-        text = release.read_text(encoding="utf-8").replace(
-            expected,
-            "f\"socratic-{os.environ['RELEASE_PLATFORM']}-arm64\"\n"
-            f"              # {expected}",
-            1,
-        )
-        release.write_text(text, encoding="utf-8")
-
-        errors = validate(root)
-
-        self.assertIn(
-            "Native rename and upload steps must produce x86_64 artifacts",
-            errors,
-        )
-
-    def test_release_workflow_rejects_arm64_upload_path_with_comment_decoy(
-        self,
-    ) -> None:
-        temp, root = self.make_root()
-        self.addCleanup(temp.cleanup)
-        release = root / ".github/workflows/release.yml"
-        expected = (
-            "path: native-artifacts/socratic-${{ matrix.platform }}"
-            "-x86_64${{ matrix.extension }}"
-        )
-        text = release.read_text(encoding="utf-8").replace(
-            expected,
-            "path: native-artifacts/socratic-${{ matrix.platform }}"
-            "-arm64${{ matrix.extension }}\n"
-            f"          # {expected}",
-            1,
-        )
-        release.write_text(text, encoding="utf-8")
-
-        errors = validate(root)
-
-        self.assertIn(
-            "Native rename and upload steps must produce x86_64 artifacts",
+            "Python safety matrix must install .[build] before tests",
             errors,
         )
 
@@ -2521,121 +2396,6 @@ class RepositoryValidationTests(unittest.TestCase):
             errors,
         )
 
-    def test_release_manifest_step_establishes_local_importability(self) -> None:
-        release = (
-            Path(__file__).resolve().parents[1] / ".github/workflows/release.yml"
-        ).read_text(encoding="utf-8")
-        manifest = release.split("  manifest:", 1)[1].split(
-            "  publish-github:", 1
-        )[0]
-
-        self.assertIn("          import os\n", manifest)
-        self.assertIn("          import sys\n", manifest)
-        self.assertIn(
-            "          sys.path.insert(0, os.getcwd())\n",
-            manifest,
-        )
-        self.assertLess(
-            manifest.index("          sys.path.insert(0, os.getcwd())\n"),
-            manifest.index("          from socratic_learn import __version__\n"),
-        )
-
-    def test_release_manifest_import_setup_mutations_are_rejected(self) -> None:
-        mutations = {
-            "missing": "",
-            "commented": "# sys.path.insert(0, os.getcwd())",
-            "nested dead code": (
-                "if False:\n"
-                "              sys.path.insert(0, os.getcwd())"
-            ),
-            "after local import": (
-                "from socratic_learn import __version__\n"
-                "          sys.path.insert(0, os.getcwd())"
-            ),
-        }
-        for label, replacement in mutations.items():
-            with self.subTest(label=label):
-                temp, root = self.make_root()
-                self.addCleanup(temp.cleanup)
-                release = root / ".github/workflows/release.yml"
-                before_manifest, manifest = release.read_text(
-                    encoding="utf-8"
-                ).split("  manifest:", 1)
-                manifest = manifest.replace(
-                    "          sys.path.insert(0, os.getcwd())",
-                    f"          {replacement}" if replacement else "",
-                    1,
-                )
-                release.write_text(
-                    before_manifest + "  manifest:" + manifest,
-                    encoding="utf-8",
-                )
-
-                self.assertIn(
-                    "Every release shell: python step importing socratic_learn "
-                    "must add the checkout to sys.path before import",
-                    validate(root),
-                )
-
-    def test_release_manifest_import_setup_requires_exact_dependency_names(
-        self,
-    ) -> None:
-        for original, replacement in (
-            ("          import os\n", "          import os as operating_system\n"),
-            ("          import sys\n", "          import sys as system\n"),
-        ):
-            with self.subTest(original=original):
-                temp, root = self.make_root()
-                self.addCleanup(temp.cleanup)
-                release = root / ".github/workflows/release.yml"
-                before_manifest, manifest = release.read_text(
-                    encoding="utf-8"
-                ).split("  manifest:", 1)
-                manifest = manifest.replace(original, replacement, 1)
-                release.write_text(
-                    before_manifest + "  manifest:" + manifest,
-                    encoding="utf-8",
-                )
-
-                self.assertIn(
-                    "Every release shell: python step importing socratic_learn "
-                    "must add the checkout to sys.path before import",
-                    validate(root),
-                )
-
-    def test_release_manifest_rejects_setup_in_separate_step(self) -> None:
-        temp, root = self.make_root()
-        self.addCleanup(temp.cleanup)
-        release = root / ".github/workflows/release.yml"
-        before_manifest, manifest = release.read_text(encoding="utf-8").split(
-            "  manifest:", 1
-        )
-        manifest = manifest.replace(
-            "          sys.path.insert(0, os.getcwd())\n",
-            "",
-            1,
-        ).replace(
-            "      - name: Compute and validate release metadata\n",
-            "      - name: Ineffective separate manifest path setup\n"
-            "        shell: python\n"
-            "        run: |\n"
-            "          import os\n"
-            "          import sys\n"
-            "          sys.path.insert(0, os.getcwd())\n"
-            "      - name: Compute and validate release metadata\n",
-            1,
-        )
-        release.write_text(
-            before_manifest + "  manifest:" + manifest,
-            encoding="utf-8",
-        )
-
-        self.assertIn(
-            "Every release shell: python step importing socratic_learn "
-            "must add the checkout to sys.path before import",
-            validate(root),
-        )
-
     def test_release_local_import_validation_supports_literal_chomping(
         self,
     ) -> None:
@@ -2644,10 +2404,11 @@ class RepositoryValidationTests(unittest.TestCase):
                 temp, root = self.make_root()
                 self.addCleanup(temp.cleanup)
                 release = root / ".github/workflows/release.yml"
-                before_manifest, manifest = release.read_text(
+                before_version, version = release.read_text(
                     encoding="utf-8"
-                ).split("  manifest:", 1)
-                manifest = manifest.replace(
+                ).split("  verify-version:", 1)
+                version, after_version = version.split("  python-package:", 1)
+                version = version.replace(
                     "        run: |\n",
                     f"        run: {scalar}\n",
                     1,
@@ -2657,7 +2418,11 @@ class RepositoryValidationTests(unittest.TestCase):
                     1,
                 )
                 release.write_text(
-                    before_manifest + "  manifest:" + manifest,
+                    before_version
+                    + "  verify-version:"
+                    + version
+                    + "  python-package:"
+                    + after_version,
                     encoding="utf-8",
                 )
 
@@ -2671,16 +2436,21 @@ class RepositoryValidationTests(unittest.TestCase):
         temp, root = self.make_root()
         self.addCleanup(temp.cleanup)
         release = root / ".github/workflows/release.yml"
-        before_manifest, manifest = release.read_text(encoding="utf-8").split(
-            "  manifest:", 1
+        before_version, version = release.read_text(encoding="utf-8").split(
+            "  verify-version:", 1
         )
-        manifest = manifest.replace(
+        version, after_version = version.split("  python-package:", 1)
+        version = version.replace(
             "        run: |\n",
             "        run: >-\n",
             1,
         )
         release.write_text(
-            before_manifest + "  manifest:" + manifest,
+            before_version
+            + "  verify-version:"
+            + version
+            + "  python-package:"
+            + after_version,
             encoding="utf-8",
         )
 
@@ -2703,10 +2473,11 @@ class RepositoryValidationTests(unittest.TestCase):
                 temp, root = self.make_root()
                 self.addCleanup(temp.cleanup)
                 release = root / ".github/workflows/release.yml"
-                before_manifest, manifest = release.read_text(
+                before_version, version = release.read_text(
                     encoding="utf-8"
-                ).split("  manifest:", 1)
-                manifest = manifest.replace(
+                ).split("  verify-version:", 1)
+                version, after_version = version.split("  python-package:", 1)
+                version = version.replace(
                     "        shell: python\n",
                     f"        {declaration}\n",
                     1,
@@ -2716,7 +2487,11 @@ class RepositoryValidationTests(unittest.TestCase):
                     1,
                 )
                 release.write_text(
-                    before_manifest + "  manifest:" + manifest,
+                    before_version
+                    + "  verify-version:"
+                    + version
+                    + "  python-package:"
+                    + after_version,
                     encoding="utf-8",
                 )
 
@@ -2739,10 +2514,11 @@ class RepositoryValidationTests(unittest.TestCase):
                 temp, root = self.make_root()
                 self.addCleanup(temp.cleanup)
                 release = root / ".github/workflows/release.yml"
-                before_manifest, manifest = release.read_text(
+                before_version, version = release.read_text(
                     encoding="utf-8"
-                ).split("  manifest:", 1)
-                manifest = manifest.replace(
+                ).split("  verify-version:", 1)
+                version, after_version = version.split("  python-package:", 1)
+                version = version.replace(
                     "        shell: python\n",
                     f"        {declaration}\n",
                     1,
@@ -2752,7 +2528,11 @@ class RepositoryValidationTests(unittest.TestCase):
                     1,
                 )
                 release.write_text(
-                    before_manifest + "  manifest:" + manifest,
+                    before_version
+                    + "  verify-version:"
+                    + version
+                    + "  python-package:"
+                    + after_version,
                     encoding="utf-8",
                 )
 
@@ -2766,23 +2546,28 @@ class RepositoryValidationTests(unittest.TestCase):
         temp, root = self.make_root()
         self.addCleanup(temp.cleanup)
         release = root / ".github/workflows/release.yml"
-        before_manifest, manifest = release.read_text(encoding="utf-8").split(
-            "  manifest:", 1
+        before_version, version = release.read_text(encoding="utf-8").split(
+            "  verify-version:", 1
         )
-        manifest = manifest.replace(
+        version, after_version = version.split("  python-package:", 1)
+        version = version.replace(
             "        shell: python\n",
             "",
             1,
         ).replace(
-            "\n    needs: native\n",
+            "\n    runs-on: ubuntu-latest\n",
             "\n    defaults:\n"
             "      run:\n"
             "        shell: python\n"
-            "    needs: native\n",
+            "    runs-on: ubuntu-latest\n",
             1,
         )
         release.write_text(
-            before_manifest + "  manifest:" + manifest,
+            before_version
+            + "  verify-version:"
+            + version
+            + "  python-package:"
+            + after_version,
             encoding="utf-8",
         )
 
@@ -2879,8 +2664,8 @@ class RepositoryValidationTests(unittest.TestCase):
         )
         before_pypi, pypi = text.split("  publish-pypi:", 1)
         pypi = pypi.replace(
-            "needs: [python-package, native, manifest]",
             "needs: python-package",
+            "needs: verify-version",
             1,
         )
         text = before_pypi + "  publish-pypi:" + pypi
@@ -2893,7 +2678,7 @@ class RepositoryValidationTests(unittest.TestCase):
             errors,
         )
         self.assertIn(
-            "PyPI publishing must wait for package, native, and manifest jobs",
+            "PyPI publishing must wait for the Python package job",
             errors,
         )
 
