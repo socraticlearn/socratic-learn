@@ -52,11 +52,12 @@ def _ordered_section_map(text: str) -> dict[str, str]:
 
     index = 1
     while index < len(lines) and not lines[index].startswith("## "):
-        if lines[index].strip():
-            raise integrity("session record has unexpected content before required headings")
         index += 1
     if index >= len(lines):
         raise integrity("session record is missing required headings")
+    preamble = _HTML_COMMENT_RE.sub("", "\n".join(lines[1:index])).strip()
+    if preamble:
+        raise integrity("session record has unexpected content before required headings")
 
     sections: dict[str, list[str]] = {}
     expected_index = 0

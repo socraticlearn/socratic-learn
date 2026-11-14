@@ -26,6 +26,7 @@ from socratic_learn.threads import parse_session_record
 from socratic_learn.threads import (
     create_pending_encounter,
     create_thread,
+    discover_menu_records,
     finalize_thread_encounter,
     list_threads,
     load_thread,
@@ -135,6 +136,39 @@ class LauncherTests(unittest.TestCase):
                 run_process=inspect_before_launch,
                 environ={"SOCRATIC_LEARN_HOME": temporary},
             )
+
+    def test_child_lifetime_lease_blocks_concurrent_menu_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            def inspect_active_launch(argv, **_kwargs):
+                checkpoint = _checkpoint_from_argv(argv)
+                records = checkpoint.parents[3]
+                thread_id = checkpoint.parents[1].name
+                checkpoint.write_text(
+                    _valid_session_body(
+                        title="Logic: Concurrent checkpoint",
+                        next_step="Finish in the owning launcher.",
+                    ),
+                    encoding="utf-8",
+                )
+
+                discovered = discover_menu_records(records)
+
+                self.assertEqual(1, len(discovered.threads))
+                self.assertTrue(checkpoint.is_file())
+                self.assertIsNone(load_thread(records, thread_id).latest_encounter)
+                return CompletedProcess(argv, 0)
+
+            run_learning(
+                LaunchOptions("logic", "pi", False, Path.cwd()),
+                output=io.StringIO(),
+                which={"pi": "pi"}.get,
+                run_process=inspect_active_launch,
+                environ={"SOCRATIC_LEARN_HOME": temporary},
+            )
+
+            records = Path(temporary) / "learning/.socratic-learn/workspace"
+            stored = load_thread(records, list_threads(records)[0].id)
+            self.assertEqual("Logic: Concurrent checkpoint", stored.refined_title)
 
     def test_command_failure_removes_new_unlaunched_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -653,6 +687,25 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(1, len(warnings))
             self.assertIn("2", warnings[0])
             self.assertNotIn("broken.md", warnings[0])
+
+    def test_recovery_failure_warns_but_keeps_thread_in_menu(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = prepare_personal_workspace(Path(temporary))
+            thread = create_thread(workspace.records, goal="still visible")
+            output = io.StringIO()
+
+            with mock.patch(
+                "socratic_learn.thread_storage.recover_pending_encounters",
+                side_effect=IntegrityError("private recovery detail"),
+            ):
+                items = launcher_module._stored_menu_items(
+                    workspace.records,
+                    output=output,
+                )
+
+            self.assertEqual([thread.id], [item.thread_id for item in items])
+            self.assertIn("recovery", output.getvalue())
+            self.assertNotIn("private recovery detail", output.getvalue())
 
     def test_mixed_menu_timestamp_ties_keep_stable_thread_order(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

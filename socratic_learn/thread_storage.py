@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import errno
 import hashlib
 import json
 import os
@@ -48,6 +49,45 @@ _THREAD_FILENAME = "thread.json"
 _SESSIONS_DIRNAME = "sessions"
 _PENDING_PREFIX = "pending-"
 _LEGACY_SOURCE_FILENAME = "legacy-source.json"
+
+
+class PendingLease:
+    """An OS-released advisory lock associated with one pending checkpoint."""
+
+    def __init__(self, path: Path, descriptor: int) -> None:
+        self.path = path
+        self._descriptor = descriptor
+
+    def release(self, *, remove: bool = False) -> None:
+        descriptor = self._descriptor
+        if descriptor is None:
+            return
+        self._descriptor = None
+        identity = os.fstat(descriptor)
+        try:
+            _unlock_lease_descriptor(descriptor)
+        finally:
+            os.close(descriptor)
+        if not remove:
+            return
+        try:
+            current = self.path.stat(follow_symlinks=False)
+            if (
+                stat.S_ISREG(current.st_mode)
+                and current.st_dev == identity.st_dev
+                and current.st_ino == identity.st_ino
+            ):
+                self.path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
+
+    def __enter__(self) -> PendingLease:
+        return self
+
+    def __exit__(self, *_error: object) -> None:
+        self.release()
 
 
 def threads_root(records: Path) -> Path:
@@ -167,10 +207,13 @@ def _imported_legacy_threads(records: Path) -> dict[str, ThreadRecord]:
     threads = require_threads_root(records)
     imported: dict[str, ThreadRecord] = {}
     for entry in sorted(threads.iterdir(), key=lambda item: item.name):
-        if not _is_complete_thread_dir(entry):
-            raise integrity("thread entry is not valid", path=entry)
-        record = load_thread(records, entry.name)
-        digest = _load_legacy_source_digest(entry)
+        try:
+            if not _is_complete_thread_dir(entry):
+                continue
+            record = load_thread(records, entry.name)
+            digest = _load_legacy_source_digest(entry)
+        except (IntegrityError, OSError, UnicodeError):
+            continue
         if digest is not None:
             imported.setdefault(digest, record)
     return imported
@@ -264,6 +307,85 @@ def _pending_filename() -> str:
     return f"{_PENDING_PREFIX}{secrets.token_hex(8)}.md"
 
 
+def _pending_lease_path(pending: Path) -> Path:
+    _extract_pending_token(pending.name)
+    return pending.with_name(f".{pending.name}.lease")
+
+
+def _try_lock_lease_descriptor(descriptor: int) -> bool:
+    if os.name == "nt":
+        import msvcrt
+
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+        except OSError as error:
+            if error.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                return False
+            raise
+        return True
+
+    import fcntl
+
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as error:
+        if error.errno in {errno.EACCES, errno.EAGAIN}:
+            return False
+        raise
+    return True
+
+
+def _unlock_lease_descriptor(descriptor: int) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        return
+
+    import fcntl
+
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+    except OSError:
+        pass
+
+
+def _try_acquire_lease_path(path: Path) -> PendingLease | None:
+    if path.is_symlink():
+        raise integrity("pending encounter lease must not be a symbolic link", path=path)
+    flags = os.O_RDWR | os.O_CREAT
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except OSError as error:
+        raise integrity("pending encounter lease could not be opened", path=path) from error
+    try:
+        status = os.fstat(descriptor)
+        if not stat.S_ISREG(status.st_mode) or path.is_symlink():
+            raise integrity("pending encounter lease must be a regular file", path=path)
+        os.set_inheritable(descriptor, False)
+        if status.st_size == 0:
+            os.write(descriptor, b"\0")
+            os.fsync(descriptor)
+        if not _try_lock_lease_descriptor(descriptor):
+            os.close(descriptor)
+            return None
+        return PendingLease(path, descriptor)
+    except BaseException:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        raise
+
+
 def create_pending_encounter(
     records: Path,
     thread_id: str,
@@ -300,6 +422,52 @@ def create_pending_encounter(
     return destination
 
 
+def create_pending_encounter_with_lease(
+    records: Path,
+    thread_id: str,
+) -> tuple[Path, PendingLease]:
+    """Create a pending checkpoint while already holding its advisory lease."""
+    validate_storage_ancestry(records, thread_id=thread_id)
+    load_thread(records, thread_id)
+    _thread_dir, sessions_dir, _metadata_path = require_thread_workspace(
+        records,
+        thread_id,
+    )
+    while True:
+        pending = sessions_dir / _pending_filename()
+        if pending.exists() or pending.is_symlink():
+            continue
+        lease = _try_acquire_lease_path(_pending_lease_path(pending))
+        if lease is None:
+            continue
+        try:
+            created = create_pending_encounter(
+                records,
+                thread_id,
+                path=pending,
+            )
+        except BaseException:
+            lease.release(remove=True)
+            raise
+        return created, lease
+
+
+def try_acquire_pending_lease(
+    records: Path,
+    thread_id: str,
+    encounter_path: Path,
+) -> PendingLease | None:
+    """Try to lease one regular pending checkpoint without blocking."""
+    validate_storage_ancestry(records, thread_id=thread_id)
+    _thread_dir, sessions_dir, _metadata_path = require_thread_workspace(
+        records,
+        thread_id,
+    )
+    pending = resolve_pending_child(sessions_dir, encounter_path)
+    _require_regular_file(pending, "pending encounter record")
+    return _try_acquire_lease_path(_pending_lease_path(pending))
+
+
 def discard_pending_encounter(
     records: Path,
     thread_id: str,
@@ -320,6 +488,8 @@ def discard_unlaunched_thread(
     records: Path,
     thread_id: str,
     encounter_path: Path,
+    *,
+    lease: PendingLease | None = None,
 ) -> None:
     """Remove a new thread that never reached child process launch."""
     validate_storage_ancestry(records, thread_id=thread_id)
@@ -331,10 +501,16 @@ def discard_unlaunched_thread(
     pending = resolve_pending_child(sessions_dir, encounter_path)
     _require_regular_file(pending, "pending encounter record")
     entries = tuple(sessions_dir.iterdir())
+    expected_entries = {pending}
+    if lease is not None:
+        expected_lease = _pending_lease_path(pending)
+        if lease.path != expected_lease:
+            raise integrity("pending encounter lease does not match", path=lease.path)
+        _require_regular_file(expected_lease, "pending encounter lease")
+        expected_entries.add(expected_lease)
     if (
         current.latest_encounter is not None
-        or len(entries) != 1
-        or entries[0] != pending
+        or set(entries) != expected_entries
         or pending.stat(follow_symlinks=False).st_size != 0
         or _legacy_source_marker(thread_dir).exists()
         or _legacy_source_marker(thread_dir).is_symlink()
@@ -342,6 +518,8 @@ def discard_unlaunched_thread(
         raise integrity("unlaunched thread is not safe to remove", path=thread_dir)
     try:
         pending.unlink()
+        if lease is not None:
+            lease.release(remove=True)
         metadata_path.unlink()
         sessions_dir.rmdir()
         thread_dir.rmdir()
@@ -543,19 +721,31 @@ def recover_pending_encounters(records: Path, thread_id: str) -> PendingRecovery
 
     promoted = 0
     discarded = 0
+    active = 0
     for _modified, _name, pending in sorted(regular):
-        try:
-            parse_session_record(pending.read_text(encoding="utf-8"))
-        except (IntegrityError, OSError, UnicodeError):
-            discard_pending_encounter(records, thread_id, pending)
-            discarded += 1
+        if _pending_lease_path(pending).is_symlink():
+            unsafe += 1
             continue
-        finalize_thread_encounter(records, thread_id, pending)
-        promoted += 1
+        lease = try_acquire_pending_lease(records, thread_id, pending)
+        if lease is None:
+            active += 1
+            continue
+        try:
+            try:
+                parse_session_record(pending.read_text(encoding="utf-8"))
+            except (IntegrityError, OSError, UnicodeError):
+                discard_pending_encounter(records, thread_id, pending)
+                discarded += 1
+                continue
+            finalize_thread_encounter(records, thread_id, pending)
+            promoted += 1
+        finally:
+            lease.release(remove=True)
     return PendingRecovery(
         promoted=promoted,
         discarded=discarded,
         unsafe=unsafe,
+        active=active,
     )
 
 
@@ -653,15 +843,23 @@ def discover_menu_records(records: Path) -> MenuDiscovery:
     invalid = 0
     discarded_pending = 0
     unsafe_pending = 0
+    recovery_failures = 0
     if threads_dir.is_dir():
         for entry in sorted(threads_dir.iterdir(), key=lambda item: item.name):
             try:
                 if not _is_complete_thread_dir(entry):
                     raise integrity("thread entry is not valid", path=entry)
                 record = load_thread(records, entry.name)
+            except (IntegrityError, OSError, UnicodeError):
+                invalid += 1
+                continue
+            try:
                 recovery = recover_pending_encounters(records, record.id)
                 discarded_pending += recovery.discarded
                 unsafe_pending += recovery.unsafe
+            except (IntegrityError, OSError, UnicodeError):
+                recovery_failures += 1
+            try:
                 record = load_thread(records, entry.name)
                 digest = _load_legacy_source_digest(entry)
                 if digest is not None:
@@ -719,6 +917,7 @@ def discover_menu_records(records: Path) -> MenuDiscovery:
         invalid_entries=invalid,
         discarded_pending=discarded_pending,
         unsafe_pending=unsafe_pending,
+        recovery_failures=recovery_failures,
     )
 
 

@@ -76,6 +76,7 @@ class PendingRecovery:
     promoted: int = 0
     discarded: int = 0
     unsafe: int = 0
+    active: int = 0
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,7 @@ class MenuDiscovery:
     invalid_entries: int = 0
     discarded_pending: int = 0
     unsafe_pending: int = 0
+    recovery_failures: int = 0
 
 
 def integrity(message: str, *, path: Path | None = None) -> IntegrityError:

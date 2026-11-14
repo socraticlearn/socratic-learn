@@ -14,7 +14,9 @@ from .thread_schema import (
 )
 from .thread_paths import ensure_threads_root
 from .thread_storage import (
+    PendingLease,
     create_pending_encounter,
+    create_pending_encounter_with_lease,
     create_thread,
     discard_unlaunched_thread,
     discard_pending_encounter,
@@ -27,6 +29,7 @@ from .thread_storage import (
     mark_thread_incomplete,
     recover_pending_encounters,
     threads_root,
+    try_acquire_pending_lease,
 )
 
 __all__ = (
@@ -35,9 +38,11 @@ __all__ = (
     "MenuDiscovery",
     "PendingRecovery",
     "ParsedSessionRecord",
+    "PendingLease",
     "ThreadRecord",
     "ThreadSummary",
     "create_pending_encounter",
+    "create_pending_encounter_with_lease",
     "create_thread",
     "discard_unlaunched_thread",
     "discard_pending_encounter",
@@ -52,4 +57,5 @@ __all__ = (
     "recover_pending_encounters",
     "parse_session_record",
     "threads_root",
+    "try_acquire_pending_lease",
 )

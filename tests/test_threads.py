@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 import uuid
@@ -16,6 +18,7 @@ from socratic_learn.thread_schema import parse_utc_timestamp
 from socratic_learn.threads import (
     THREAD_SCHEMA_VERSION,
     create_pending_encounter,
+    create_pending_encounter_with_lease,
     create_thread,
     discard_pending_encounter,
     discover_legacy_sessions,
@@ -26,6 +29,7 @@ from socratic_learn.threads import (
     mark_thread_incomplete,
     parse_session_record,
     recover_pending_encounters,
+    try_acquire_pending_lease,
     threads_root,
 )
 
@@ -399,6 +403,24 @@ class ThreadStorageTests(unittest.TestCase):
         self.assertEqual(1, len(list_threads(self.records)))
         self.assertEqual((), discover_legacy_sessions(self.records))
 
+    def test_corrupt_thread_does_not_block_valid_legacy_import(self) -> None:
+        corrupt = threads_root(self.records) / str(uuid.uuid4())
+        (corrupt / "sessions").mkdir(parents=True)
+        (corrupt / "thread.json").write_text("{broken", encoding="utf-8")
+        legacy = self.records / "sessions" / "legacy.md"
+        legacy.write_text(
+            _valid_session_body(
+                title="History: Valid legacy",
+                next_step="Continue.",
+            ),
+            encoding="utf-8",
+        )
+
+        imported = import_legacy_session(self.records, legacy)
+
+        self.assertEqual("History: Valid legacy", imported.refined_title)
+        self.assertTrue(legacy.is_file())
+
     def test_legacy_without_refined_title_is_complete_prior_evidence(self) -> None:
         legacy = self.records / "sessions" / "legacy.md"
         legacy.write_text(
@@ -516,6 +538,18 @@ class ThreadStorageTests(unittest.TestCase):
         text = text.replace("\n\n## Outcome", "\nPreamble noise\n\n## Outcome", 1)
         with self.assertRaises(IntegrityError):
             parse_session_record(text)
+
+    def test_parse_allows_html_comment_preamble(self) -> None:
+        text = _valid_session_body(
+            title="Math: Template comments",
+            next_step="Continue.",
+        ).replace(
+            "\n\n## Outcome",
+            "\n<!-- Complete the required sections below. -->\n\n## Outcome",
+            1,
+        )
+        parsed = parse_session_record(text)
+        self.assertEqual("Math: Template comments", parsed.refined_title)
 
     def test_timestamp_fields_reject_non_string_types(self) -> None:
         with self.assertRaises(IntegrityError):
@@ -639,6 +673,93 @@ class ThreadStorageTests(unittest.TestCase):
         self.assertEqual(2, recovery.discarded)
         self.assertEqual(0, recovery.unsafe)
         self.assertEqual([], list(empty.parent.iterdir()))
+
+    def test_active_empty_and_valid_pending_checkpoints_are_not_recovered(self) -> None:
+        thread = create_thread(self.records, goal="concurrent launch")
+        empty, empty_lease = create_pending_encounter_with_lease(
+            self.records,
+            thread.id,
+        )
+        valid, valid_lease = create_pending_encounter_with_lease(
+            self.records,
+            thread.id,
+        )
+        valid.write_text(
+            _valid_session_body(
+                title="Logic: Active checkpoint",
+                next_step="Wait for the active launcher.",
+            ),
+            encoding="utf-8",
+        )
+        self.addCleanup(empty_lease.release)
+        self.addCleanup(valid_lease.release)
+
+        recovery = recover_pending_encounters(self.records, thread.id)
+
+        self.assertEqual(2, recovery.active)
+        self.assertEqual(0, recovery.promoted)
+        self.assertEqual(0, recovery.discarded)
+        self.assertTrue(empty.is_file())
+        self.assertTrue(valid.is_file())
+        self.assertIsNone(load_thread(self.records, thread.id).latest_encounter)
+
+        empty_lease.release()
+        valid_lease.release()
+        recovered = recover_pending_encounters(self.records, thread.id)
+        self.assertEqual(1, recovered.promoted)
+        self.assertEqual(1, recovered.discarded)
+        self.assertFalse(empty.exists())
+        self.assertFalse(valid.exists())
+
+    def test_pending_lease_is_released_when_owner_process_exits(self) -> None:
+        thread = create_thread(self.records, goal="crashed launcher")
+        pending = create_pending_encounter(self.records, thread.id)
+        code = (
+            "import sys\n"
+            "from pathlib import Path\n"
+            "from socratic_learn.threads import try_acquire_pending_lease\n"
+            "lease = try_acquire_pending_lease("
+            "Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]))\n"
+            "assert lease is not None\n"
+            "print('locked', flush=True)\n"
+            "sys.stdin.read()\n"
+        )
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                code,
+                str(self.records),
+                thread.id,
+                str(pending),
+            ],
+            cwd=Path(__file__).resolve().parents[1],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        self.addCleanup(lambda: process.poll() is None and process.kill())
+        assert process.stdout is not None
+        self.assertEqual("locked", process.stdout.readline().strip())
+        self.assertEqual(
+            1,
+            recover_pending_encounters(self.records, thread.id).active,
+        )
+
+        process.kill()
+        process.wait(timeout=10)
+        assert process.stdin is not None
+        process.stdin.close()
+        process.stdout.close()
+
+        acquired = try_acquire_pending_lease(
+            self.records,
+            thread.id,
+            pending,
+        )
+        self.assertIsNotNone(acquired)
+        assert acquired is not None
+        acquired.release()
 
     @unittest.skipUnless(_symlinks_supported(), "symlinks unavailable")
     def test_orphan_pending_symlink_is_untouched_and_reported(self) -> None:

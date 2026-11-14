@@ -23,8 +23,9 @@ from .sources.payload import build_source_study_payload
 from .manifest import session_record_contract_payload
 from .terminal_menu import MenuChoice, choose_menu_item
 from .threads import (
+    PendingLease,
     ThreadRecord,
-    create_pending_encounter,
+    create_pending_encounter_with_lease,
     create_thread,
     discard_unlaunched_thread,
     discard_pending_encounter,
@@ -124,6 +125,10 @@ def _stored_menu_items(
     if discovery.unsafe_pending:
         issues.append(
             f"left {discovery.unsafe_pending} unsafe pending checkpoints untouched"
+        )
+    if discovery.recovery_failures:
+        issues.append(
+            f"recovery failed for {discovery.recovery_failures} saved threads"
         )
     if issues:
         _write_warning(output, "warning: " + "; ".join(issues) + ".\n")
@@ -364,9 +369,10 @@ def _discard_before_launch(
     thread_id: str,
     pending: Path,
     created_new: bool,
+    lease: PendingLease,
 ) -> None:
     if created_new:
-        discard_unlaunched_thread(records, thread_id, pending)
+        discard_unlaunched_thread(records, thread_id, pending, lease=lease)
     else:
         discard_pending_encounter(records, thread_id, pending)
 
@@ -445,6 +451,122 @@ def _prompt_for_agent(
             continue
         if 1 <= index <= len(names) and answer.strip() == str(index):
             return names[index - 1]
+
+
+def _launch_with_pending(
+    *,
+    thread: ThreadRecord,
+    pending: Path,
+    lease: PendingLease,
+    records: Path,
+    workspace_root: Path,
+    protocol: Path,
+    is_resume: bool,
+    created_new: bool,
+    source_payload: str | None,
+    host: DetectedHost,
+    selected: AgentName,
+    run_process: Callable[..., subprocess.CompletedProcess[object]],
+    output: TextIO,
+    environ: Mapping[str, str] | None,
+) -> int:
+    try:
+        launch_payload = _build_launch_payload(
+            thread=thread,
+            pending=pending,
+            records=records,
+            is_resume=is_resume,
+            source_study_payload=source_payload,
+        )
+        argv = command_for(
+            host.adapter,
+            host.executable,
+            protocol,
+            launch_payload,
+        )
+        argv = _safe_windows_host_argv(host.executable, argv, environ)
+    except BaseException as primary:
+        _best_effort(
+            lambda: _discard_before_launch(
+                records=records,
+                thread_id=thread.id,
+                pending=pending,
+                created_new=created_new,
+                lease=lease,
+            ),
+            output=output,
+            primary=primary,
+        )
+        raise
+
+    try:
+        mark_thread_incomplete(records, thread.id)
+    except BaseException as primary:
+        _best_effort(
+            lambda: _discard_before_launch(
+                records=records,
+                thread_id=thread.id,
+                pending=pending,
+                created_new=created_new,
+                lease=lease,
+            ),
+            output=output,
+            primary=primary,
+        )
+        raise
+
+    try:
+        result = run_process(list(argv), cwd=workspace_root, check=False)
+    except KeyboardInterrupt:
+        _best_effort(
+            lambda: _finish_encounter(
+                records=records,
+                thread_id=thread.id,
+                pending=pending,
+                output=output,
+            ),
+            output=output,
+        )
+        return 130
+    except FileNotFoundError as error:
+        launcher_error = FilesystemError(
+            f"agent '{selected}' executable disappeared before launch",
+            path=host.executable,
+            remediation="restore the executable or select another agent",
+        )
+        _best_effort(
+            lambda: _finish_encounter(
+                records=records,
+                thread_id=thread.id,
+                pending=pending,
+                output=output,
+            ),
+            output=output,
+            primary=launcher_error,
+        )
+        raise launcher_error from error
+    except BaseException as primary:
+        _best_effort(
+            lambda: _finish_encounter(
+                records=records,
+                thread_id=thread.id,
+                pending=pending,
+                output=output,
+            ),
+            output=output,
+            primary=primary,
+        )
+        raise
+    _best_effort(
+        lambda: _finish_encounter(
+            records=records,
+            thread_id=thread.id,
+            pending=pending,
+            output=output,
+        ),
+        output=output,
+    )
+    return result.returncode
 
 
 def run_learning(
@@ -550,101 +672,24 @@ def run_learning(
         assert selected_item.legacy_path is not None
         thread = import_legacy_session(workspace.records, selected_item.legacy_path)
 
-    pending = create_pending_encounter(workspace.records, thread.id)
-
+    pending, lease = create_pending_encounter_with_lease(workspace.records, thread.id)
     host = detected[selected]
     try:
-        launch_payload = _build_launch_payload(
+        return _launch_with_pending(
             thread=thread,
             pending=pending,
+            lease=lease,
             records=workspace.records,
+            workspace_root=workspace.root,
+            protocol=workspace.protocol,
             is_resume=is_resume,
-            source_study_payload=source_payload,
-        )
-        argv = command_for(
-            host.adapter,
-            host.executable,
-            workspace.protocol,
-            launch_payload,
-        )
-        argv = _safe_windows_host_argv(host.executable, argv, environ)
-    except BaseException as primary:
-        _best_effort(
-            lambda: _discard_before_launch(
-                records=workspace.records,
-                thread_id=thread.id,
-                pending=pending,
-                created_new=created_new,
-            ),
+            created_new=created_new,
+            source_payload=source_payload,
+            host=host,
+            selected=selected,
+            run_process=run_process,
             output=output,
-            primary=primary,
+            environ=environ,
         )
-        raise
-
-    try:
-        mark_thread_incomplete(workspace.records, thread.id)
-    except BaseException as primary:
-        _best_effort(
-            lambda: _discard_before_launch(
-                records=workspace.records,
-                thread_id=thread.id,
-                pending=pending,
-                created_new=created_new,
-            ),
-            output=output,
-            primary=primary,
-        )
-        raise
-
-    try:
-        result = run_process(list(argv), cwd=workspace.root, check=False)
-    except KeyboardInterrupt:
-        _best_effort(
-            lambda: _finish_encounter(
-                records=workspace.records,
-                thread_id=thread.id,
-                pending=pending,
-                output=output,
-            ),
-            output=output,
-        )
-        return 130
-    except FileNotFoundError as error:
-        launcher_error = FilesystemError(
-            f"agent '{selected}' executable disappeared before launch",
-            path=host.executable,
-            remediation="restore the executable or select another agent",
-        )
-        _best_effort(
-            lambda: _finish_encounter(
-                records=workspace.records,
-                thread_id=thread.id,
-                pending=pending,
-                output=output,
-            ),
-            output=output,
-            primary=launcher_error,
-        )
-        raise launcher_error from error
-    except BaseException as primary:
-        _best_effort(
-            lambda: _finish_encounter(
-                records=workspace.records,
-                thread_id=thread.id,
-                pending=pending,
-                output=output,
-            ),
-            output=output,
-            primary=primary,
-        )
-        raise
-    _best_effort(
-        lambda: _finish_encounter(
-            records=workspace.records,
-            thread_id=thread.id,
-            pending=pending,
-            output=output,
-        ),
-        output=output,
-    )
-    return result.returncode
+    finally:
+        lease.release(remove=True)
