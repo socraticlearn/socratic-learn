@@ -351,6 +351,17 @@ def finalize_thread_encounter(
             raise integrity("encounter record could not be read", path=final_path) from error
         if _mapped_final_name(pending.name, parsed.session_date) != final_path.name:
             raise integrity("promoted encounter record does not match pending token", path=final_path)
+        if (
+            current.latest_encounter == final_path.name
+            and current.status == "complete"
+            and current.refined_title == parsed.refined_title
+            and current.next_step == parsed.next_step
+        ):
+            return current
+        raise integrity(
+            "pending encounter retry does not match current thread metadata",
+            path=pending,
+        )
 
     if (
         current.latest_encounter == final_path.name

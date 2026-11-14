@@ -194,6 +194,30 @@ class ThreadStorageTests(unittest.TestCase):
         ]
         self.assertEqual(1, len(finals))
 
+    def test_finalize_retry_rejects_stale_pending_after_newer_encounter(self) -> None:
+        thread = create_thread(self.records, goal="encounter order")
+        pending_a = create_pending_encounter(self.records, thread.id)
+        pending_b = create_pending_encounter(self.records, thread.id)
+        pending_a.write_text(
+            _valid_session_body(title="Physics: Motion", next_step="Continue A."),
+            encoding="utf-8",
+        )
+        pending_b.write_text(
+            _valid_session_body(title="Physics: Energy", next_step="Continue B."),
+            encoding="utf-8",
+        )
+        first = finalize_thread_encounter(self.records, thread.id, pending_a)
+        second = finalize_thread_encounter(self.records, thread.id, pending_b)
+        before = load_thread(self.records, thread.id)
+
+        with self.assertRaises(IntegrityError):
+            finalize_thread_encounter(self.records, thread.id, pending_a)
+
+        after = load_thread(self.records, thread.id)
+        self.assertEqual(before, after)
+        self.assertEqual(second.latest_encounter, after.latest_encounter)
+        self.assertNotEqual(first.latest_encounter, after.latest_encounter)
+
     def test_finalize_identical_content_creates_distinct_final_encounters(self) -> None:
         thread = create_thread(self.records, goal="duplicate bodies")
         body = _valid_session_body(title="Chemistry: Bonds", next_step="Continue.")
