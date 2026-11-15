@@ -184,6 +184,11 @@ README_NEGATED_EFFECTIVENESS_PATTERNS = (
     ),
 )
 RUNTIME_PDF_DEPENDENCY = "pypdf>=7.0,<8"
+RUNTIME_VERSION_DEPENDENCY = "packaging>=25.0,<26"
+RUNTIME_DEPENDENCIES = [
+    RUNTIME_VERSION_DEPENDENCY,
+    RUNTIME_PDF_DEPENDENCY,
+]
 README_RUNTIME_REQUIREMENTS = (
     "dependency-light python 3.11+",
     "pypdf",
@@ -1437,10 +1442,10 @@ def validate_release_automation(root: Path) -> list[str]:
         else:
             project_metadata = project.get("project", {})
             dependencies = project.get("project", {}).get("dependencies", [])
-            if dependencies != [RUNTIME_PDF_DEPENDENCY]:
+            if dependencies != RUNTIME_DEPENDENCIES:
                 errors.append(
                     "pyproject.toml must declare exactly "
-                    f"{RUNTIME_PDF_DEPENDENCY} as the runtime dependency"
+                    f"{', '.join(RUNTIME_DEPENDENCIES)} as runtime dependencies"
                 )
             if (
                 project_metadata.get("name") != "socratic-learn"

@@ -19,7 +19,7 @@ from tests.validate_repository import (
     MANIFEST_REFERENCE_VERSION_PATTERNS,
     MANIFEST_REFERENCE_VERSION_POLICY_PATTERNS,
     README_PORTABLE_SESSION_PATTERNS,
-    RUNTIME_PDF_DEPENDENCY,
+    RUNTIME_DEPENDENCIES,
     SESSION_PROTOCOL_PORTABLE_PATTERNS,
     UNSAFE_INSTALLER_PATTERNS,
     check_document_patterns,
@@ -2055,7 +2055,8 @@ class RepositoryValidationTests(unittest.TestCase):
             'socratic = "socratic_learn.cli:entry_point"',
             pyproject,
         )
-        self.assertIn(RUNTIME_PDF_DEPENDENCY, pyproject)
+        for dependency in RUNTIME_DEPENDENCIES:
+            self.assertIn(dependency, pyproject)
 
         release = (root / ".github/workflows/release.yml").read_text(
             encoding="utf-8"
@@ -2298,7 +2299,7 @@ class RepositoryValidationTests(unittest.TestCase):
 
         self.assertIn(
             "pyproject.toml must declare exactly "
-            f"{RUNTIME_PDF_DEPENDENCY} as the runtime dependency",
+            f"{', '.join(RUNTIME_DEPENDENCIES)} as runtime dependencies",
             validate(root),
         )
 
