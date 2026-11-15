@@ -118,6 +118,8 @@ def learner_sentinel_path(home_root: Path) -> Path:
     return (
         home_root
         / ".socratic-learn"
+        / "learning"
+        / ".socratic-learn"
         / "workspace"
         / "registry-smoke-sentinel.txt"
     )
@@ -215,6 +217,20 @@ def wait_for_registry(
         sleep(delay_seconds)
 
 
+def _windows_comspec() -> str:
+    return os.environ.get("COMSPEC", r"C:\Windows\System32\cmd.exe")
+
+
+def _requires_cmd_wrapper(executable: str) -> bool:
+    return os.name == "nt" and Path(executable).suffix.lower() in {".cmd", ".bat"}
+
+
+def prepare_subprocess_argv(argv: list[str]) -> list[str]:
+    if not argv or not _requires_cmd_wrapper(argv[0]):
+        return argv
+    return [_windows_comspec(), "/d", "/c", "call", *argv]
+
+
 def production_run_command(
     argv: list[str],
     env: dict[str, str],
@@ -224,7 +240,7 @@ def production_run_command(
     safe_env.pop("PYTHONPATH", None)
     safe_env["PYTHONSAFEPATH"] = "1"
     return subprocess.run(
-        argv,
+        prepare_subprocess_argv(argv),
         env=safe_env,
         cwd=cwd,
         check=False,

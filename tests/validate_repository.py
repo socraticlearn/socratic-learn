@@ -629,13 +629,13 @@ def markdown_files(root: Path) -> list[Path]:
         untracked_controller_scratch = (
             git_error is None
             and relative.parent.as_posix() == ".superpowers/sdd"
-            and relative.name.startswith("task-")
             and relative.as_posix() not in tracked
         )
         if (
             path.is_file()
             and ".git" not in relative.parts
             and "workspace" not in relative.parts
+            and "vendor" not in relative.parts
             and not untracked_controller_scratch
         ):
             files.append(path)
@@ -1575,7 +1575,8 @@ def validate_release_automation(root: Path) -> list[str]:
                 "tools/build_npm_package.py",
                 "packages/npm-cli/package.json",
                 "npm test --prefix packages/npm-cli",
-                "npx --yes --package",
+                "assert_exact_version_output",
+                '"--package"',
                 "@socraticlearn/cli",
                 "socraticlearn-cli-",
             ):
@@ -1641,10 +1642,81 @@ def validate_release_automation(root: Path) -> list[str]:
                         "npm-package job must verify canonical package identity"
                     )
 
-        github_needs = workflow_job_needs(github_publish)
-        if "python-package" not in github_needs or "npm-package" not in github_needs:
+        verify_artifact = workflow_job(release, "verify-artifact")
+        if not verify_artifact:
             errors.append(
-                "publish-github must depend on python-package and npm-package"
+                "Release workflow must verify built artifacts before publishing"
+            )
+        else:
+            artifact_needs = workflow_job_needs(verify_artifact)
+            if artifact_needs != ["npm-package"]:
+                errors.append(
+                    "Artifact verification must wait for the npm-package job"
+                )
+            matrix_section = verify_artifact.split("strategy:", 1)
+            if len(matrix_section) < 2:
+                errors.append(
+                    "Artifact verification must use a multi-platform matrix"
+                )
+            else:
+                matrix = matrix_section[1].split("steps:", 1)[0]
+                if "fail-fast: false" not in matrix:
+                    errors.append(
+                        "Artifact verification matrix must not fail fast "
+                        "across runners"
+                    )
+                for runner in (
+                    "windows-latest",
+                    "ubuntu-latest",
+                    "macos-latest",
+                ):
+                    if runner not in matrix:
+                        errors.append(
+                            "Artifact verification must run on clean "
+                            f"{runner} runners"
+                        )
+                        break
+            for marker in (
+                'python-version: "3.11"',
+                "pipx",
+                'node-version: "24"',
+                "package-manager-cache: false",
+                "run_local_artifact_smoke",
+                "name: python-package",
+                "name: npm-package",
+            ):
+                if marker not in verify_artifact:
+                    errors.append(
+                        "Artifact verification is missing required tooling "
+                        "or helper"
+                    )
+                    break
+            if "from socratic_learn import" in verify_artifact:
+                errors.append(
+                    "Artifact verification must not import the checkout package"
+                )
+            if "sys.path.insert" in verify_artifact:
+                errors.append(
+                    "Artifact verification must not add the checkout to sys.path"
+                )
+            artifact_order = release.find("  verify-artifact:")
+            npm_order = release.find("  npm-package:")
+            github_order = release.find("  publish-github:")
+            if (
+                artifact_order == -1
+                or npm_order == -1
+                or github_order == -1
+                or not (npm_order < artifact_order < github_order)
+            ):
+                errors.append(
+                    "Artifact verification must run after npm-package and "
+                    "before publish-github"
+                )
+
+        github_needs = workflow_job_needs(github_publish)
+        if github_needs != ["verify-artifact"]:
+            errors.append(
+                "publish-github must wait for pre-publish artifact verification"
             )
         github_downloads = [
             workflow_action_input(step, "name")
@@ -2011,6 +2083,17 @@ def validate_release_automation(root: Path) -> list[str]:
             errors.append(
                 "Python safety matrix must build and smoke-test an installed wheel"
             )
+        for marker in (
+            "actions/setup-node@v6",
+            'node-version: "24"',
+            "package-manager-cache: false",
+            "npm test --prefix packages/npm-cli",
+        ):
+            if marker not in normal:
+                errors.append(
+                    "Python safety matrix must run npm launcher tests"
+                )
+                break
     return errors
 
 

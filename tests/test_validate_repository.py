@@ -356,7 +356,7 @@ class RepositoryValidationTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.assertEqual([], validate(root))
 
-    def test_markdown_files_skip_only_untracked_task_controller_files(
+    def test_markdown_files_skip_untracked_controller_scratch(
         self,
     ) -> None:
         with TemporaryDirectory() as temporary:
@@ -364,14 +364,16 @@ class RepositoryValidationTests(unittest.TestCase):
             controller = root / ".superpowers" / "sdd"
             controller.mkdir(parents=True)
             scratch = controller / "task-3-review-package.md"
+            review_bundle = controller / "final-review-package.md"
             tracked_task = controller / "task-history.md"
             universal = controller / "universal-task-3-report.md"
             progress = controller / "progress.md"
-            for path in (scratch, tracked_task, universal, progress):
+            for path in (scratch, review_bundle, tracked_task, universal, progress):
                 path.write_text("# record\n", encoding="utf-8")
             tracked = {
                 tracked_task.relative_to(root).as_posix(),
                 universal.relative_to(root).as_posix(),
+                progress.relative_to(root).as_posix(),
             }
 
             with patch(
@@ -384,6 +386,7 @@ class RepositoryValidationTests(unittest.TestCase):
                 }
 
             self.assertNotIn(scratch.relative_to(root).as_posix(), discovered)
+            self.assertNotIn(review_bundle.relative_to(root).as_posix(), discovered)
             self.assertIn(tracked_task.relative_to(root).as_posix(), discovered)
             self.assertIn(universal.relative_to(root).as_posix(), discovered)
             self.assertIn(progress.relative_to(root).as_posix(), discovered)
@@ -3785,6 +3788,7 @@ class SynchronizedRegistryReleaseTests(unittest.TestCase):
             "verify-version:",
             "python-package:",
             "npm-package:",
+            "verify-artifact:",
             "publish-github:",
             "publish-pypi:",
             "publish-npm:",
@@ -3793,13 +3797,16 @@ class SynchronizedRegistryReleaseTests(unittest.TestCase):
             with self.subTest(job=job):
                 self.assertIn(f"  {job}", release)
         self.assertIn("needs: verify-version", release.split("python-package:", 1)[1])
-        npm = release.split("  npm-package:", 1)[1].split("  publish-github:", 1)[0]
+        npm = release.split("  npm-package:", 1)[1].split("  verify-artifact:", 1)[0]
         self.assertIn("python-package", npm)
+        verify = release.split("  verify-artifact:", 1)[1].split(
+            "  publish-github:", 1
+        )[0]
+        self.assertIn("npm-package", verify)
         github = release.split("  publish-github:", 1)[1].split(
             "  publish-pypi:", 1
         )[0]
-        self.assertIn("python-package", github)
-        self.assertIn("npm-package", github)
+        self.assertIn("verify-artifact", github)
         pypi = release.split("  publish-pypi:", 1)[1].split("  publish-npm:", 1)[0]
         npm_publish = release.split("  publish-npm:", 1)[1]
         self.assertIn("needs: publish-github", pypi)
@@ -3811,7 +3818,7 @@ class SynchronizedRegistryReleaseTests(unittest.TestCase):
 
     def test_npm_package_job_builds_from_downloaded_python_artifact(self) -> None:
         npm = self.release.split("  npm-package:", 1)[1].split(
-            "  publish-github:", 1
+            "  verify-artifact:", 1
         )[0]
         for value in (
             "ubuntu-latest",
@@ -3824,8 +3831,10 @@ class SynchronizedRegistryReleaseTests(unittest.TestCase):
             "packages/npm-cli/package.json",
             '"@socraticlearn/cli"',
             "npm test --prefix packages/npm-cli",
-            "npx --yes --package",
-            "socratic --version",
+            "assert_exact_version_output",
+            '"--package"',
+            "socratic",
+            "--version",
             "name: npm-package",
             "if-no-files-found: error",
             "@socraticlearn/cli",
@@ -4004,6 +4013,66 @@ class SynchronizedRegistryReleaseTests(unittest.TestCase):
         )
         self.assertIn(
             "npm publishing must consume the npm-package artifact only",
+            validate(root),
+        )
+
+    def test_verify_artifact_job_matrix_and_dependencies(self) -> None:
+        release = self.release
+        self.assertIn("  verify-artifact:", release)
+        job = release.split("  verify-artifact:", 1)[1]
+        head = job.split("steps:", 1)[0]
+        self.assertIn("npm-package", head)
+        self.assertIn("matrix:", head)
+        self.assertIn("fail-fast: false", head)
+        for runner in ("windows-latest", "ubuntu-latest", "macos-latest"):
+            with self.subTest(runner=runner):
+                self.assertIn(runner, head)
+        body = job.split("steps:", 1)[1]
+        for marker in (
+            'python-version: "3.11"',
+            "pipx",
+            'node-version: "24"',
+            "package-manager-cache: false",
+            "run_local_artifact_smoke",
+            "name: python-package",
+            "name: npm-package",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, body)
+        self.assertNotIn("from socratic_learn import", body)
+        self.assertNotIn("sys.path.insert", body)
+
+    def test_validator_rejects_missing_verify_artifact_job(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        release = root / ".github/workflows/release.yml"
+        release.write_text(
+            release.read_text(encoding="utf-8").replace(
+                "  verify-artifact:",
+                "  verify-artifact-disabled:",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        self.assertIn(
+            "Release workflow must verify built artifacts before publishing",
+            validate(root),
+        )
+
+    def test_validator_rejects_publish_github_without_verify_artifact(self) -> None:
+        temp, root = RepositoryValidationTests.make_root(self)
+        self.addCleanup(temp.cleanup)
+        release = root / ".github/workflows/release.yml"
+        release.write_text(
+            release.read_text(encoding="utf-8").replace(
+                "needs:\n      - verify-artifact",
+                "needs:\n      - npm-package",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        self.assertIn(
+            "publish-github must wait for pre-publish artifact verification",
             validate(root),
         )
 

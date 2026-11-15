@@ -62,8 +62,12 @@ function createLauncher(deps = {}) {
         }
         resolve({ status: 'exited', code: code ?? 1 });
       });
-      child.on('error', () => {
+      child.on('error', (error) => {
         cleanup();
+        const detail = error && error.message ? error.message : 'unknown error';
+        writeStderr(
+          `Failed to start ${interpreter.executable} after selecting Python ${interpreter.version.join('.')}: ${detail}\n`,
+        );
         resolve({ status: 'exited', code: 1 });
       });
     });

@@ -115,6 +115,29 @@ describe('createLauncher', () => {
     assert.deepEqual(forwarded, ['SIGTERM']);
   });
 
+  it('prints spawn guidance when interpreter probing succeeded', async () => {
+    const child = fakeChild();
+    const writes = [];
+    const launcher = createLauncher({
+      packageRoot: '/pkg',
+      resolveInterpreter: async () => ({
+        executable: '/usr/bin/python3.11',
+        args: [],
+        version: [3, 11, 8],
+      }),
+      spawn: () => {
+        queueMicrotask(() => child.emit('error', new Error('spawn EACCES')));
+        return child;
+      },
+      writeStderr: (chunk) => writes.push(chunk),
+    });
+
+    const outcome = await launcher.run(['--version']);
+    assert.deepEqual(outcome, { status: 'exited', code: 1 });
+    assert.match(writes.join(''), /Failed to start \/usr\/bin\/python3\.11/);
+    assert.match(writes.join(''), /spawn EACCES/);
+  });
+
   it('exits nonzero with guidance when Python is missing', async () => {
     const writes = [];
     const launcher = createLauncher({

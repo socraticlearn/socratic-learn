@@ -136,20 +136,103 @@ jobs:
       - name: Run npm package tests
         run: npm test --prefix packages/npm-cli
       - name: Smoke packed tarball
+        shell: python
         run: |
-          tarball="$(ls npm-dist/*.tgz)"
-          npx --yes --package "$tarball" socratic --version
+          import os
+          import pathlib
+          import subprocess
+          import sys
+
+          root = pathlib.Path.cwd()
+          sys.path.insert(0, os.getcwd())
+          from socratic_learn import __version__
+          from tests.registry_smoke import assert_exact_version_output
+
+          tarball = next((root / "npm-dist").glob("*.tgz"))
+          completed = subprocess.run(
+              [
+                  "npx",
+                  "--yes",
+                  "--package",
+                  str(tarball),
+                  "--",
+                  "socratic",
+                  "--version",
+              ],
+              check=False,
+              capture_output=True,
+              text=True,
+          )
+          if completed.returncode != 0:
+              raise SystemExit(
+                  f"npm tarball smoke failed ({completed.returncode}): "
+                  f"{completed.stdout}\n{completed.stderr}"
+              )
+          assert_exact_version_output(
+              f"{completed.stdout}\n{completed.stderr}",
+              __version__,
+          )
       - uses: actions/upload-artifact@v4
         with:
           name: npm-package
           path: npm-dist/*.tgz
           if-no-files-found: error
 
+  verify-artifact:
+    needs: npm-package
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pipx
+        run: python -m pip install --upgrade pip pipx
+      - name: Ensure pipx path
+        run: python -m pipx ensurepath
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Use npm trusted publishing floor
+        run: npm install -g "npm@>=11.5.1"
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-package
+          path: release-dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-package
+          path: npm-dist
+      - name: Verify release artifacts on clean platform
+        shell: python
+        run: |
+          import pathlib
+          import re
+
+          dist = pathlib.Path("release-dist")
+          npm_dist = pathlib.Path("npm-dist")
+          wheel = next(dist.glob("socratic_learn-*-py3-none-any.whl"))
+          tarball = next(npm_dist.glob("*.tgz"))
+          match = re.match(
+              r"socratic_learn-(?P<version>.+)-py3-none-any\.whl$",
+              wheel.name,
+          )
+          if not match:
+              raise SystemExit(f"unexpected wheel name: {wheel.name}")
+          version = match.group("version")
+          from tests.registry_smoke import run_local_artifact_smoke
+
+          run_local_artifact_smoke(version, wheel=wheel, npm_tarball=tarball)
+
   publish-github:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs:
-      - python-package
-      - npm-package
+      - verify-artifact
     runs-on: ubuntu-latest
     permissions:
       contents: write

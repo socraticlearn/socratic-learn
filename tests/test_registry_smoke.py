@@ -18,6 +18,7 @@ from tests.registry_smoke import (
     checkout_root,
     learner_sentinel_path,
     npm_exec_argv,
+    prepare_subprocess_argv,
     production_run_command,
     run_local_artifact_smoke,
     run_registry_smoke,
@@ -110,8 +111,45 @@ class RegistrySmokeCommandTests(unittest.TestCase):
         home = Path("/tmp/smoke-home")
         self.assertEqual(
             learner_sentinel_path(home),
-            home / ".socratic-learn" / "workspace" / "registry-smoke-sentinel.txt",
+            home
+            / ".socratic-learn"
+            / "learning"
+            / ".socratic-learn"
+            / "workspace"
+            / "registry-smoke-sentinel.txt",
         )
+
+    def test_prepare_subprocess_argv_wraps_windows_batch_launchers(self) -> None:
+        npx_cmd = r"C:\Program Files\nodejs\npx.cmd"
+        argv = [npx_cmd, "--yes", "--package", "@socraticlearn/cli@1.0.0", "--", "socratic", "--version"]
+        with mock.patch("tests.registry_smoke.os.name", "nt"), mock.patch(
+            "tests.registry_smoke._windows_comspec",
+            return_value=r"C:\Windows\System32\cmd.exe",
+        ):
+            prepared = prepare_subprocess_argv(argv)
+        self.assertEqual(prepared[0].lower(), r"c:\windows\system32\cmd.exe")
+        self.assertEqual(prepared[1:4], ["/d", "/c", "call"])
+        self.assertEqual(prepared[4:], argv)
+
+    def test_prepare_subprocess_argv_keeps_native_windows_executables(self) -> None:
+        argv = [r"C:\Program Files\nodejs\npx.exe", "--yes"]
+        with mock.patch("tests.registry_smoke.os.name", "nt"):
+            self.assertEqual(prepare_subprocess_argv(argv), argv)
+
+    def test_production_run_command_wraps_windows_npm_smoke_argv(self) -> None:
+        npx_cmd = r"C:\Tools\npx.cmd"
+        cwd = Path("/tmp/isolated-smoke-cwd")
+        with mock.patch("tests.registry_smoke.os.name", "nt"), mock.patch(
+            "tests.registry_smoke._windows_comspec",
+            return_value=r"C:\Windows\System32\cmd.exe",
+        ), mock.patch(
+            "tests.registry_smoke.subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, "", ""),
+        ) as run:
+            production_run_command([npx_cmd, "--yes", "socratic", "--version"], {}, cwd)
+        argv = run.call_args.args[0]
+        self.assertTrue(Path(argv[0]).suffix.lower() == ".exe")
+        self.assertEqual(argv[1:4], ["/d", "/c", "call"])
 
 
 class RegistrySmokeRetryTests(unittest.TestCase):
@@ -350,7 +388,9 @@ class RegistrySmokeRunnerTests(unittest.TestCase):
 
     def test_run_registry_smoke_preserves_sentinel_data(self) -> None:
         version = "0.4.1"
-        sentinel = Path("/tmp/registry-smoke/.socratic-learn/workspace/sentinel.txt")
+        sentinel = Path(
+            "/tmp/registry-smoke/.socratic-learn/learning/.socratic-learn/workspace/sentinel.txt"
+        )
         sentinel.parent.mkdir(parents=True, exist_ok=True)
         sentinel.write_text(
             "registry-smoke-preservation-check\n",
@@ -385,7 +425,7 @@ class RegistrySmokeRunnerTests(unittest.TestCase):
             run_registry_smoke(
                 version,
                 run_command=run,
-                home_root=sentinel.parents[2],
+                home_root=Path("/tmp/registry-smoke"),
                 work_cwd=Path("/tmp/registry-smoke-work"),
             )
         self.assertEqual(
@@ -482,6 +522,58 @@ class LocalArtifactSmokeTests(unittest.TestCase):
             "upgrade",
             [token for install in pipx_installs for token in install],
         )
+
+
+class VerifyArtifactWorkflowTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.root = Path(__file__).resolve().parents[1]
+        cls.release = (cls.root / ".github/workflows/release.yml").read_text(
+            encoding="utf-8",
+        )
+
+    def _verify_artifact_job(self) -> str:
+        from tests.validate_repository import workflow_job
+
+        return workflow_job(self.release, "verify-artifact")
+
+    def test_verify_artifact_matrix_runs_on_three_platforms(self) -> None:
+        job = self._verify_artifact_job()
+        self.assertIn("windows-latest", job)
+        self.assertIn("ubuntu-latest", job)
+        self.assertIn("macos-latest", job)
+        self.assertIn("matrix:", job)
+        self.assertIn("fail-fast: false", job)
+
+    def test_verify_artifact_depends_on_npm_package_only(self) -> None:
+        job = self._verify_artifact_job()
+        self.assertIn("npm-package", job)
+        needs_section = job.split("needs:", 1)[1].split("strategy:", 1)[0]
+        self.assertNotIn("publish-github", needs_section)
+        self.assertNotIn("publish-pypi", needs_section)
+
+    def test_verify_artifact_uses_downloaded_artifacts_without_source_import(self) -> None:
+        step_section = self._verify_artifact_job()
+        self.assertIn("run_local_artifact_smoke", step_section)
+        self.assertIn("name: python-package", step_section)
+        self.assertIn("name: npm-package", step_section)
+        self.assertNotIn("from socratic_learn import", step_section)
+        self.assertNotIn("sys.path.insert", step_section)
+
+    def test_release_graph_lists_verify_artifact_before_publish_github(self) -> None:
+        self.assertIn("  verify-artifact:", self.release)
+        self.assertLess(
+            self.release.index("  npm-package:"),
+            self.release.index("  verify-artifact:"),
+        )
+        self.assertLess(
+            self.release.index("  verify-artifact:"),
+            self.release.index("  publish-github:"),
+        )
+        github = self.release.split("  publish-github:", 1)[1].split(
+            "  publish-pypi:", 1
+        )[0]
+        self.assertIn("verify-artifact", github)
 
 
 class RegistrySmokeWorkflowTests(unittest.TestCase):

@@ -30,6 +30,12 @@ jobs:
         run: python -m unittest discover -s tests -p "test_*.py" -v
       - name: Validate repository
         run: python tests/validate_repository.py
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Run npm launcher tests
+        run: npm test --prefix packages/npm-cli
       - name: Build wheel
         run: python -m build --wheel --outdir "${{ runner.temp }}/wheelhouse"
       - name: Smoke test installed socratic read

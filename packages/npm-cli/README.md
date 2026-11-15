@@ -28,3 +28,13 @@ npm test --prefix packages/npm-cli
 
 The vendor tree is generated from the release wheel by `tools/build_npm_package.py`.
 Generated `vendor/` output and npm tarballs are not committed to git.
+
+`vendor-requirements.lock` uses a strict one-line pip format per dependency:
+
+```text
+name==version \
+    --hash=sha256:<64 lowercase hex digits>
+```
+
+Each non-empty line must pin exactly one pure-Python wheel hash. Platform markers,
+multiple hashes on one requirement, and unlocked dependency lines are rejected.
