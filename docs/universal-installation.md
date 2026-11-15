@@ -65,6 +65,13 @@ For `npx`, each invocation resolves the package at run time. Upgrades follow
 npm publishing; uninstalling a global npm copy is not required for occasional
 `npx` use.
 
+Learning-session startup checks the public PyPI package metadata at most once
+every 24 hours. A newer version produces the update command for the active
+distribution channel. Network and cache failures do not block startup. The
+request does not include learner data. Set `SOCRATIC_NO_UPDATE_CHECK=1` to
+disable it; cached metadata is stored at
+`~/.socratic-learn/update-check.json` or under `SOCRATIC_LEARN_HOME`.
+
 ## Host ownership and first-run behavior
 
 The launcher host supplies the terminal, provider authentication, model

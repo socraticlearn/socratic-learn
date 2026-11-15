@@ -18,6 +18,12 @@ class ConsoleCliTests(unittest.TestCase):
         banner_patcher = mock.patch("socratic_learn.cli.write_banner")
         self.write_banner = banner_patcher.start()
         self.addCleanup(banner_patcher.stop)
+        update_patcher = mock.patch(
+            "socratic_learn.cli.check_for_update",
+            return_value=None,
+        )
+        self.check_for_update = update_patcher.start()
+        self.addCleanup(update_patcher.stop)
 
     def assert_banner_written_once(self) -> None:
         self.write_banner.assert_called_once_with(sys.stdout, os.environ)
@@ -35,6 +41,24 @@ class ConsoleCliTests(unittest.TestCase):
             LaunchOptions(None, None, False, Path.cwd())
         )
         self.assertEqual(["banner", "run"], events)
+
+    @mock.patch("socratic_learn.cli.run_learning", return_value=0)
+    def test_learning_launch_prints_update_notice(
+        self,
+        run: mock.Mock,
+    ) -> None:
+        self.check_for_update.return_value = (
+            "Update available: Socratic Learn 0.2.0 (installed: 0.1.0)\n"
+            "Run: pipx upgrade socratic-learn"
+        )
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            self.assertEqual(0, main([]))
+
+        self.assertIn("Update available: Socratic Learn 0.2.0", stderr.getvalue())
+        self.check_for_update.assert_called_once()
+        run.assert_called_once()
 
     @mock.patch("socratic_learn.cli.run_learning", return_value=0)
     def test_direct_goal_and_options_launch(self, run: mock.Mock) -> None:

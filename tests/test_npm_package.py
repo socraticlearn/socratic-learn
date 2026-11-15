@@ -22,10 +22,13 @@ class NpmPackageBuildTests(unittest.TestCase):
     def test_builder_module_exists(self) -> None:
         self.assertTrue(self.builder.is_file(), "tools/build_npm_package.py is required")
 
-    def test_lock_matches_pyproject_pypdf_constraint(self) -> None:
+    def test_lock_matches_pyproject_runtime_constraints(self) -> None:
         lock = (self.npm_cli / "vendor-requirements.lock").read_text("utf-8")
         project = tomllib.loads((self.root / "pyproject.toml").read_text("utf-8"))
-        self.assertEqual(["pypdf>=7.0,<8"], project["project"]["dependencies"])
+        self.assertEqual(
+            ["packaging>=25.0,<26", "pypdf>=7.0,<8"],
+            project["project"]["dependencies"],
+        )
         match = re.search(r"^pypdf==(7\.\d+\.\d+)", lock, re.MULTILINE)
         self.assertIsNotNone(match)
         version = tuple(int(part) for part in match.group(1).split("."))

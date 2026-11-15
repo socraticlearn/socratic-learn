@@ -13,9 +13,21 @@ from socratic_learn.banner import write_banner
 from socratic_learn.errors import LearningTutorError, SourceError, UsageError
 from socratic_learn.launcher import LaunchOptions, run_learning
 from socratic_learn.sources.model import SourceRequest
+from socratic_learn.update_check import check_for_update
+from socratic_learn.workspace import launcher_home
 
 _ADMIN_COMMANDS = {"build", "export", "install", "doctor"}
 _AGENT_NAMES = frozenset({"pi", "claude", "antigravity"})
+
+
+def _write_update_notice() -> None:
+    notice = check_for_update(
+        __version__,
+        home=launcher_home(os.environ),
+        environ=os.environ,
+    )
+    if notice:
+        print(notice, file=sys.stderr)
 
 
 class _ArgumentParser(argparse.ArgumentParser):
@@ -208,6 +220,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if _read_mode_requested(arguments):
             options = parse_read_arguments(arguments)
             write_banner(sys.stdout, os.environ)
+            _write_update_notice()
             return run_learning(options)
 
         _reject_disallowed_options(arguments)
@@ -218,6 +231,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             goal_words = goal_words[1:]
         goal = " ".join(goal_words) if goal_words else None
         write_banner(sys.stdout, os.environ)
+        _write_update_notice()
         return run_learning(
             LaunchOptions(goal, parsed.agent, parsed.here, Path.cwd())
         )

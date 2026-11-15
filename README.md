@@ -126,6 +126,12 @@ pipx uninstall socratic-learn
 `npx` is an on-demand invocation; it does not replace pipx upgrade or uninstall.
 Package removal preserves learner records under `~/.socratic-learn/learning/`.
 
+When a learning session starts, Socratic Learn checks PyPI at most once every
+24 hours and prints a short notice when a newer release exists. The check never
+reads learner data, fails silently offline, and can be disabled with
+`SOCRATIC_NO_UPDATE_CHECK=1`. Its cache is
+`~/.socratic-learn/update-check.json`.
+
 Package installation is different from adding loaders inside a project. After
 you install the published package, run `socratic install TARGET PROJECT`. If you
 work from a source checkout, use `python -m socratic_learn install` instead. See

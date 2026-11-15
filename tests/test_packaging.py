@@ -52,7 +52,7 @@ class PackagingTests(unittest.TestCase):
             project["project"]["scripts"],
         )
         self.assertEqual(
-            ["pypdf>=7.0,<8"],
+            ["packaging>=25.0,<26", "pypdf>=7.0,<8"],
             project["project"]["dependencies"],
         )
         self.assertEqual(
@@ -60,11 +60,11 @@ class PackagingTests(unittest.TestCase):
             project["project"]["optional-dependencies"]["build"],
         )
 
-    def test_runtime_declares_exact_pypdf_dependency(self) -> None:
+    def test_runtime_declares_exact_dependencies(self) -> None:
         root = Path(__file__).resolve().parents[1]
         project = tomllib.loads((root / "pyproject.toml").read_text("utf-8"))
         self.assertEqual(
-            ["pypdf>=7.0,<8"],
+            ["packaging>=25.0,<26", "pypdf>=7.0,<8"],
             project["project"]["dependencies"],
         )
 

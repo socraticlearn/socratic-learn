@@ -41,8 +41,10 @@ function createLauncher(deps = {}) {
       ...userArgs,
     ];
 
+    const pythonEnv = buildPythonEnv(env, vendorDir, env.PYTHONPATH);
+    pythonEnv.SOCRATIC_DISTRIBUTION_CHANNEL = 'npm';
     const child = spawn(interpreter.executable, pythonArgs, {
-      env: buildPythonEnv(env, vendorDir, env.PYTHONPATH),
+      env: pythonEnv,
       stdio: 'inherit',
       windowsHide: true,
       shell: false,

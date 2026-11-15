@@ -70,6 +70,7 @@ describe('createLauncher', () => {
       `${vendorPath}${path.delimiter}/existing`,
     );
     assert.equal(spawnOpts.env.USER, 'tester');
+    assert.equal(spawnOpts.env.SOCRATIC_DISTRIBUTION_CHANNEL, 'npm');
     assert.equal(spawnOpts.windowsHide, true);
     assert.notEqual(spawnOpts.shell, true);
   });
