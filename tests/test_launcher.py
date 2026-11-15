@@ -400,7 +400,7 @@ class LauncherTests(unittest.TestCase):
                 )
 
             self.assertEqual(0, result)
-            self.assertEqual("3", argument_count.read_text(encoding="ascii"))
+            self.assertEqual("4", argument_count.read_text(encoding="ascii"))
             self.assertEqual(expected_commands[0][-1].encode("utf-8"), receipt.read_bytes())
             self.assertEqual(goal, _control_from_argv(["pi", receipt.read_text("utf-8")])["thread"]["goal"])
             self.assertFalse(side_effect.exists())

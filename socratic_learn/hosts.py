@@ -34,7 +34,7 @@ def _pi(
     protocol: Path,
     launch_payload: str,
 ) -> tuple[str, ...]:
-    return executable, "--append-system-prompt", str(protocol), launch_payload
+    return executable, "--append-system-prompt", str(protocol), "--", launch_payload
 
 
 def _claude(
@@ -42,7 +42,13 @@ def _claude(
     protocol: Path,
     launch_payload: str,
 ) -> tuple[str, ...]:
-    return executable, "--append-system-prompt-file", str(protocol), launch_payload
+    return (
+        executable,
+        "--append-system-prompt-file",
+        str(protocol),
+        "--",
+        launch_payload,
+    )
 
 
 def _antigravity(
