@@ -39,14 +39,31 @@ built for any subject or skill.
 
 ## Quick start
 
-Normal use requires no repository clone and no source build. Install with
-[pipx](https://pipx.pypa.io/), which needs [Python
-3.11+](https://www.python.org/downloads/). The documented pipx command becomes
-available only after socratic-learn is published on PyPI.
+### 1. Install Socratic Learn
+
+The current public build installs directly from this repository. You need
+[Python 3.11+](https://www.python.org/downloads/) and
+[pipx](https://pipx.pypa.io/). No repository clone or source build is required.
 
 ```text
-pipx install socratic-learn
+pipx install "git+https://github.com/socraticlearn/socratic-learn.git"
+socratic --version
 ```
+
+### 2. Connect an AI host
+
+Socratic Learn supplies the learning method. You also need one supported AI
+host with access to a model. If you already use Pi, Claude Code, or Antigravity,
+skip this step.
+
+For the shortest general setup, follow
+[Pi's official quickstart](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/quickstart.md).
+Run `pi`, enter `/login`, connect a provider, and optionally use `/model` to
+choose a model. You can instead use the official setup for
+[Claude Code](https://code.claude.com/docs/en/quickstart) or
+[Antigravity](https://antigravity.google/docs/getting-started/).
+
+### 3. Start learning
 
 Start without putting your learning goal in shell history:
 
@@ -54,19 +71,9 @@ Start without putting your learning goal in shell history:
 socratic
 ```
 
-You can also invoke the published npm adapter with `npx` when you already have
-[Node.js](https://nodejs.org/) and Python 3.11+ on the machine. The npm command
-becomes available only after @socraticlearn/cli is published.
-
-```text
-npx @socraticlearn/cli
-```
-
-Both routes run the same Python implementation. Neither ships a model, provider
-credentials, or host. Install and authenticate Pi, Claude Code, or Antigravity
-yourself.
-
-You can pass a goal or choose a host directly:
+Choose **New session**, describe what you want to learn, and the selected host
+opens the learning conversation. You can also pass a goal or choose a host
+directly:
 
 ```text
 socratic "I want to learn linear algebra"
@@ -84,6 +91,20 @@ directory as the learning project, run:
 ```text
 socratic --here
 ```
+
+### Future package channels
+
+The PyPI package is not public yet. The npm package is not public yet. After the
+first release, these shorter commands will become available:
+
+```text
+pipx install socratic-learn
+npx @socraticlearn/cli
+```
+
+Both future package channels run the same Python implementation. Neither ships
+an AI host, model, provider account, or credentials. The npm route will require
+Node.js and Python 3.11+ on the same machine.
 
 Running `socratic` with no arguments opens a small menu: **New session**, your
 five most recent saved entries, and **View all** when you have more saved
@@ -113,6 +134,20 @@ Pi offers a general interactive harness. Antigravity can be launched through
 its `agy` command. Claude Code uses its own terminal experience. Cursor remains
 a project integration rather than a launcher choice.
 
+### Choose a model in Pi
+
+Inside Pi, run `/model` to open the model picker. Selecting a model changes the
+current session. To use it automatically in future sessions, highlight it in
+the picker and press `Ctrl+S`. Resuming an existing Pi session restores that
+session's latest model without changing the default for new sessions.
+
+If a request already failed, changing the model does not resend it. Select the
+new model, then submit a new message such as `continue`. A `429` response means
+the selected provider or model has reached an account or project quota. The
+error belongs to the provider, not Socratic Learn. Choose a model with available
+quota, use `/login` to configure another provider, or wait for the stated reset.
+Socratic Learn never reads or stores those credentials.
+
 Supporting any subject does not mean every host knows every subject. Accuracy
 still depends on the selected model, its sources, and its available tools.
 
@@ -139,8 +174,8 @@ work from a source checkout, use `python -m socratic_learn install` instead. See
 
 Source and releases live at
 [https://github.com/socraticlearn/socratic-learn](https://github.com/socraticlearn/socratic-learn).
-This README does not claim that the GitHub organization, PyPI project, npm
-scope, or release tags already exist.
+The GitHub installation above is available now. PyPI, npm, and tagged releases
+remain pending until the first public release completes.
 
 ## Learn from an article
 

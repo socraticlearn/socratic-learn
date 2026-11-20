@@ -247,6 +247,7 @@ README_LAUNCHER_REQUIREMENTS = (
     'socratic "i want to learn linear algebra"',
     "socratic --agent pi",
     "socratic --here",
+    'pipx install "git+https://github.com/socraticlearn/socratic-learn.git"',
     "pipx install socratic-learn",
     "npx @socraticlearn/cli",
     "pipx upgrade socratic-learn",
@@ -488,22 +489,17 @@ MANIFEST_REFERENCE_VERSION_PATTERNS = (
     *MANIFEST_REFERENCE_CONFORMANCE_PATTERNS,
     *MANIFEST_REFERENCE_VERSION_POLICY_PATTERNS,
 )
-PYPI_RELEASE_CAVEAT = (
-    "the documented pipx command becomes available only after "
-    "socratic-learn is published on pypi."
-)
-NPM_RELEASE_CAVEAT = (
-    "the npm command becomes available only after @socraticlearn/cli is "
-    "published."
-)
+PYPI_RELEASE_CAVEAT = "the pypi package is not public yet."
+NPM_RELEASE_CAVEAT = "the npm package is not public yet."
 BRANDED_REPOSITORY_URL = "https://github.com/socraticlearn/socratic-learn"
 README_ONBOARDING_ORDER = (
-    "pipx install socratic-learn",
+    'pipx install "git+https://github.com/socraticlearn/socratic-learn.git"',
     "\nsocratic\n",
-    "npx @socraticlearn/cli",
     'socratic "i want to learn linear algebra"',
     "socratic --agent pi",
     "socratic --here",
+    "pipx install socratic-learn",
+    "npx @socraticlearn/cli",
 )
 RETIRED_ACTIVE_INSTALLATION_TERMS = (
     "install.ps1",
@@ -528,7 +524,7 @@ ACTIVE_INSTALLATION_SURFACES = (
     ),
     (
         "docs/universal-installation.md",
-        "## Normal installation",
+        "## Install today from GitHub",
         "## Source and development installation",
     ),
 )

@@ -404,11 +404,12 @@ class UniversalSmokeTests(unittest.TestCase):
 
             self.assertEqual(17, result.returncode, result.stdout + result.stderr)
             invocation = json.loads(record.read_text(encoding="utf-8"))
-            self.assertEqual(3, len(invocation["argv"]))
+            self.assertEqual(4, len(invocation["argv"]))
             self.assertEqual(
                 ["--append-system-prompt", str(protocol)],
                 invocation["argv"][:2],
             )
+            self.assertEqual("--", invocation["argv"][2])
             launch_payload = extract_adapter_launch_payload(
                 "pi",
                 invocation["argv"],

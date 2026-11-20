@@ -75,3 +75,26 @@ The skill delegates to the universal [agent entry](../../AGENTS.md) and canonica
 
 The adapter exposes the same subject-neutral protocol; mathematics and AI are
 included starter curricula rather than adapter limits.
+
+## Model selection and quota errors
+
+The Pi host owns model selection, authentication, and provider quota. Socratic
+Learn adds the teaching protocol but does not override those settings.
+
+Run `/model` inside Pi to open the model picker. A normal selection applies to
+the current session. To make the highlighted model the default for new
+sessions, press `Ctrl+S` in the picker. Pi records model changes in each session,
+so resuming a session restores its latest model without replacing the saved
+default.
+
+Changing models does not replay a request that already failed. After selecting
+a different model, submit a new message such as `continue`. If Pi reports HTTP
+`429`, inspect the provider and model named in the error. That account or
+project has no quota available for the request. Choose a model with available
+quota, run `/login` to configure another provider, or wait for the reset time
+reported by the provider. Selecting another model cannot add quota or bypass
+provider restrictions.
+
+Socratic Learn neither reads nor stores Pi credentials. Pi keeps them in its
+own configuration and only lists models for providers with usable
+authentication.

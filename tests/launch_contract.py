@@ -65,15 +65,15 @@ def extract_adapter_launch_payload(
     if agent == "pi":
         if list(argv[:2]) != ["--append-system-prompt", resolved_protocol]:
             raise AssertionError("Pi protocol arguments do not match")
-        if len(argv) != 3:
+        if len(argv) != 4 or argv[2] != "--":
             raise AssertionError("Pi must receive one unwrapped launch payload")
-        return canonical_launch_payload(argv[2])
+        return canonical_launch_payload(argv[3])
     if agent == "claude":
         if list(argv[:2]) != ["--append-system-prompt-file", resolved_protocol]:
             raise AssertionError("Claude protocol arguments do not match")
-        if len(argv) != 3:
+        if len(argv) != 4 or argv[2] != "--":
             raise AssertionError("Claude must receive one unwrapped launch payload")
-        return canonical_launch_payload(argv[2])
+        return canonical_launch_payload(argv[3])
     if agent != "antigravity":
         raise AssertionError(f"unsupported adapter: {agent}")
     if len(argv) != 2 or argv[0] != "--prompt-interactive":

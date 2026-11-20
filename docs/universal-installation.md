@@ -1,16 +1,15 @@
 # Socratic Learn Installation
 
-## Normal installation
+## Install today from GitHub
 
-Normal users install once and run `socratic`; they do not clone or build this
-repository for day-to-day learning. The primary route uses
-[pipx](https://pipx.pypa.io/) with [Python 3.11 or newer](https://www.python.org/downloads/).
-The documented pipx command becomes available only after socratic-learn is
-published on PyPI. This guide does not claim that the package is already on
-PyPI.
+The current public build installs directly from the official repository.
+Users do not need to clone or build it. Install with
+[pipx](https://pipx.pypa.io/) and
+[Python 3.11 or newer](https://www.python.org/downloads/):
 
 ```text
-pipx install socratic-learn
+pipx install "git+https://github.com/socraticlearn/socratic-learn.git"
+socratic --version
 ```
 
 After installation, run `socratic` from any directory. With no goal on the
@@ -19,19 +18,19 @@ entries, and legacy imports. Pi, Claude Code, or Antigravity must already be
 installed and authenticated; Socratic Learn does not bundle a host, model,
 provider, or credentials.
 
-## Optional npm invocation
+## Future package channels
 
-If you already use Node.js, you can start sessions with `npx` instead of pipx.
-You still need Python 3.11+ on the machine. The npm command becomes available
-only after @socraticlearn/cli is published. This guide does not claim that the
-npm scope or package is already published.
+The PyPI package is not public yet. The npm package is not public yet. After the
+first release, users will be able to choose either command:
 
 ```text
+pipx install socratic-learn
 npx @socraticlearn/cli
 ```
 
-Each `npx` call downloads and runs the adapter on demand. It uses the same
-Python implementation as the pipx package.
+The future `npx` route will still need Python 3.11+ on the same machine. Each
+invocation will download the adapter on demand and run the same Python
+implementation as the pipx package.
 
 ## Prerequisites and setup links
 
@@ -43,6 +42,9 @@ not install hosts or provider credentials for you.
 - Python: [python.org/downloads](https://www.python.org/downloads/)
 - pipx: [pipx.pypa.io](https://pipx.pypa.io/)
 - Node.js: [nodejs.org](https://nodejs.org/)
+- Pi: [official quickstart](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/quickstart.md)
+- Claude Code: [official quickstart](https://code.claude.com/docs/en/quickstart)
+- Antigravity: [official setup](https://antigravity.google/docs/getting-started/)
 
 Repository and issue tracking:
 [https://github.com/socraticlearn/socratic-learn](https://github.com/socraticlearn/socratic-learn)
@@ -80,6 +82,18 @@ method, private workspace, and session checkpoints. Running `socratic` starts th
 interactive new or resume menu unless you pass a goal on the command line or run
 `socratic read` with a source. Use `socratic --here` when you want the current
 directory treated as the project workspace; it does not skip the menu.
+
+Pi model selection is session-scoped unless the learner saves a default. Run
+`/model`, highlight the desired model, and press `Ctrl+S` to use it for future
+sessions. Resuming a Pi session restores its latest model without changing that
+default. After switching models in response to a failed request, submit a new
+message because Pi does not automatically retry the failed request.
+
+A provider `429` response is a quota failure, not a Socratic Learn failure. Read
+the provider and model named in the error, then select a model with available
+quota, configure another provider with `/login`, or wait for the reported reset.
+Changing models does not grant quota or bypass provider account restrictions.
+Socratic Learn does not inspect or store provider credentials.
 
 ## Source and development installation
 

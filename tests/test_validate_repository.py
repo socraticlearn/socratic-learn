@@ -171,17 +171,12 @@ README_LAUNCHER_COMMANDS = (
     'socratic "I want to learn linear algebra"',
     "socratic --agent pi",
     "socratic --here",
+    'pipx install "git+https://github.com/socraticlearn/socratic-learn.git"',
     "pipx install socratic-learn",
     "npx @socraticlearn/cli",
 )
-PYPI_RELEASE_CAVEAT = (
-    "The documented pipx command becomes available only after "
-    "socratic-learn is published on PyPI."
-)
-NPM_RELEASE_CAVEAT = (
-    "The npm command becomes available only after @socraticlearn/cli is "
-    "published."
-)
+PYPI_RELEASE_CAVEAT = "The PyPI package is not public yet."
+NPM_RELEASE_CAVEAT = "The npm package is not public yet."
 BRANDED_REPOSITORY_URL = "https://github.com/socraticlearn/socratic-learn"
 
 
@@ -494,7 +489,7 @@ class RepositoryValidationTests(unittest.TestCase):
         self.assertNotIn("tests/fixtures/", text)
         self.assertNotRegex(text, r"!\[[^\]]*\]\(https?://")
         self.assertGreaterEqual(len(text.splitlines()), 250)
-        self.assertLessEqual(len(text.splitlines()), 300)
+        self.assertLessEqual(len(text.splitlines()), 330)
         for command in README_WORKSPACE_COMMANDS:
             with self.subTest(command=command):
                 self.assertIn(command, text)
@@ -571,12 +566,13 @@ class RepositoryValidationTests(unittest.TestCase):
         normalized_quick_start = " ".join(quick_start.split())
 
         ordered_markers = (
-            "pipx install socratic-learn",
+            'pipx install "git+https://github.com/socraticlearn/socratic-learn.git"',
             "\nsocratic\n",
-            "npx @socraticlearn/cli",
             'socratic "I want to learn linear algebra"',
             "socratic --agent pi",
             "socratic --here",
+            "pipx install socratic-learn",
+            "npx @socraticlearn/cli",
         )
         previous = -1
         for marker in ordered_markers:
