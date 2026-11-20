@@ -59,16 +59,12 @@ UNIVERSAL_REQUIRED_PATHS = (
     "docs/launcher-adapters.md",
     "docs/manifest-reference.md",
     "docs/adding-an-adapter.md",
-    "docs/superpowers/specs/2026-11-05-universal-distribution-design.md",
-    "docs/superpowers/plans/2026-11-05-universal-distribution.md",
-    "docs/superpowers/specs/2026-11-05-socratic-learn-rename-design.md",
-    "docs/superpowers/plans/2026-11-05-socratic-learn-rename.md",
+    "docs/source-study.md",
     ".github/workflows/native-python.yml",
 )
 RELEASE_REQUIRED_PATHS = (
     "pyproject.toml",
     ".github/workflows/release.yml",
-    "docs/superpowers/plans/2026-11-06-one-command-learning-launcher.md",
 )
 RETIRED_NATIVE_RELEASE_TERMS = (
     "pyinstaller",
@@ -96,15 +92,15 @@ CURRICULUM_FIELD_RE = re.compile(
     re.MULTILINE,
 )
 ADAPTER_ENTRIES = (
-    ".cursor/skills/socratic-learn/SKILL.md",
     "adapters/cursor/README.md",
+    "adapters/cursor/skills/socratic-learn/SKILL.md",
     "adapters/claude-code/CLAUDE.md",
     "adapters/claude-code/README.md",
     "adapters/pi/skills/socratic-learn/SKILL.md",
     "adapters/pi/README.md",
 )
 ADAPTER_SKILLS = (
-    ".cursor/skills/socratic-learn/SKILL.md",
+    "adapters/cursor/skills/socratic-learn/SKILL.md",
     "adapters/pi/skills/socratic-learn/SKILL.md",
     "adapters/pi/skills/socratic-learn/SKILL.project.md.template",
     "socratic_learn/templates/cursor-skill.md",
@@ -129,42 +125,25 @@ SESSION_H2_HEADINGS = (
     "## Sources",
 )
 README_HEADINGS = (
-    "## Why it is different",
+    "## What you get",
     "## Quick start",
-    "## Choose an AI host",
-    "## Learn from an article",
-    "## How the method works",
-    "## Research and limitations",
-    "## Technical documentation",
+    "## How a session moves",
+    "## Supported launcher hosts",
+    "## Privacy and ownership",
+    "## Honest limitations",
+    "## Documentation",
     "## License",
 )
-README_TAGLINE = (
-    "Turn any AI agent into a tutor that checks whether you actually learned."
-)
+README_TAGLINE = "Learn any subject. Prove it by doing."
 README_OPENING_PROMISE = "learn any subject"
 README_UNFRIENDLY_DASHES = ("—", "–")
 README_PORTFOLIO_REQUIREMENTS = (
-    "I built Socratic Learn out of a recurring need in my work as an AI researcher",
-    "objective → prerequisites → guided route → application → evidence",
-    "Mahoney et al. (2023)",
-    "Munshi et al. (2023)",
-    "Borchers et al. (2025)",
-    "van den Broek et al. (2025)",
-    "Stogniy et al. (2020)",
-    "Lee et al. (2025)",
-    "https://doi.org/10.1016/j.tsc.2023.101422",
-    "https://doi.org/10.1111/jcal.12761",
-    "https://doi.org/10.1016/j.compedu.2025.105364",
-    "https://doi.org/10.1016/j.learninstruc.2025.102196",
-    "https://doi.org/10.1096/fasebj.2020.34.s1.04148",
-    "https://doi.org/10.48550/arXiv.2509.16262",
-    "three unchanged-protocol Antigravity sessions",
-    "no pedagogy score was assigned",
-    "evaluation/reports/2026-11-06-antigravity-baseline.md",
-)
-README_WORKSPACE_COMMANDS = (
-    "Copy-Item -Recurse workspace.example\\* workspace",
-    "cp -R workspace.example/. workspace/",
+    "open-source agentic learning framework",
+    "agent-agnostic tutoring layer",
+    "real application",
+    "private learner records",
+    "source-bounded study",
+    "research cited in the docs informed design choices",
 )
 README_LAUNCHER_COMMANDS = (
     "socratic",
@@ -183,7 +162,8 @@ BRANDED_REPOSITORY_URL = "https://github.com/socraticlearn/socratic-learn"
 def requirement_pattern(requirement: str) -> re.Pattern[str]:
     words = re.split(r"[ \t\r\n]+", requirement.strip())
     return re.compile(
-        r"[ \t\r\n]+".join(re.escape(word) for word in words)
+        r"[ \t\r\n]+".join(re.escape(word) for word in words),
+        re.IGNORECASE,
     )
 
 
@@ -273,7 +253,8 @@ class RepositoryValidationTests(unittest.TestCase):
             root.mkdir(parents=True)
         (root / ".gitignore").write_text(
             "workspace/*\n!workspace/.gitkeep\n__pycache__/\n*.py[cod]\n"
-            "/package-dist/\n/.semantic-runs/\n",
+            "/package-dist/\n/.semantic-runs/\n/.cursor/\n/.superpowers/\n"
+            "/docs/superpowers/\n",
             encoding="utf-8",
         )
         (root / ".gitattributes").write_text(
@@ -294,8 +275,8 @@ class RepositoryValidationTests(unittest.TestCase):
             "templates/learning-goal.md",
             "templates/session-log.md",
             "templates/progress.md",
-            ".cursor/skills/socratic-learn/SKILL.md",
             "adapters/cursor/README.md",
+            "adapters/cursor/skills/socratic-learn/SKILL.md",
             "adapters/claude-code/CLAUDE.md",
             "adapters/claude-code/README.md",
             "adapters/pi/skills/socratic-learn/SKILL.md",
@@ -401,15 +382,15 @@ class RepositoryValidationTests(unittest.TestCase):
     def test_validator_rejects_missing_posix_threat_model(self) -> None:
         temp, root = self.make_root()
         self.addCleanup(temp.cleanup)
-        readme = root / "README.md"
-        readme.write_text("# Portable AI Learning Environment\n", encoding="utf-8")
+        guide = root / "docs/universal-installation.md"
+        guide.write_text("# Installation\n", encoding="utf-8")
 
         errors = validate(root)
 
         self.assertTrue(
             any(
                 "POSIX same-principal threat model" in error
-                and "README.md" in error
+                and "docs/universal-installation.md" in error
                 for error in errors
             ),
             errors,
@@ -418,16 +399,13 @@ class RepositoryValidationTests(unittest.TestCase):
     def test_runtime_and_acceptance_language_stays_scoped(self) -> None:
         root = Path(__file__).resolve().parents[1]
         install = (root / "socratic_learn/install.py").read_text(encoding="utf-8")
-        design = (
-            root / "docs/superpowers/specs/2026-11-05-universal-distribution-design.md"
-        ).read_text(encoding="utf-8")
+        guide = (root / "docs/universal-installation.md").read_text(
+            encoding="utf-8"
+        )
 
         self.assertNotIn("no external data was deleted", install.lower())
-        self.assertIn(
-            "must not knowingly overwrite modified or unowned files",
-            design.lower(),
-        )
-        self.assertIn("hostile same-principal mutation", design.lower())
+        self.assertIn("same os principal", guide.lower())
+        self.assertIn("leaf-entry toctou", guide.lower())
 
     def test_agents_entry_references_every_core_document(self) -> None:
         temp, root = self.make_root()
@@ -449,7 +427,7 @@ class RepositoryValidationTests(unittest.TestCase):
         self.assertTrue(text.startswith("# Socratic Learn\n"))
         tagline = f"**{README_TAGLINE}**"
         self.assertIn(tagline, text)
-        opening = text.split("## Why it is different", 1)[0]
+        opening = text.split("## What you get", 1)[0]
         first_prose_paragraph = readme_opening_prose_paragraph(opening)
         self.assertIn(
             README_OPENING_PROMISE,
@@ -458,7 +436,7 @@ class RepositoryValidationTests(unittest.TestCase):
         for dash in README_UNFRIENDLY_DASHES:
             with self.subTest(dash=dash):
                 self.assertNotIn(dash, text)
-        self.assertIn("any subject or skill", text.lower())
+        self.assertIn("any subject", text.lower())
         self.assertIn("starter curricula", text.lower())
         headings = tuple(
             line for line in text.splitlines() if line.startswith("## ")
@@ -474,29 +452,29 @@ class RepositoryValidationTests(unittest.TestCase):
         normalized_text = " ".join(text.split())
         for requirement in README_PORTFOLIO_REQUIREMENTS:
             with self.subTest(portfolio_requirement=requirement):
-                self.assertIn(" ".join(requirement.split()), normalized_text)
+                self.assertIn(
+                    " ".join(requirement.split()).lower(),
+                    normalized_text.lower(),
+                )
+        normalized_opening = normalize(opening).lower()
         for signal in (
-            "Any subject",
-            "Your AI host",
-            "Progress through application",
-            'socratic "I want to learn',
+            "open-source agentic learning framework",
+            "agent-agnostic tutoring layer",
+            "learn any subject",
         ):
             with self.subTest(signal=signal):
-                self.assertIn(signal.lower(), opening.lower())
+                self.assertIn(signal.lower(), normalized_opening)
         self.assertNotIn("tests", opening.lower())
         self.assertNotIn(" | ", opening)
         self.assertNotIn("███████╗", text)
         self.assertNotIn("tests/fixtures/", text)
-        self.assertNotRegex(text, r"!\[[^\]]*\]\(https?://")
-        self.assertGreaterEqual(len(text.splitlines()), 250)
-        self.assertLessEqual(len(text.splitlines()), 330)
-        for command in README_WORKSPACE_COMMANDS:
-            with self.subTest(command=command):
-                self.assertIn(command, text)
-        self.assertIn("**Preview the route.**", text)
-        self.assertIn("start teaching automatically", normalized_text)
-        self.assertIn("redirect at any time", normalized_text)
-        self.assertNotIn("learner approval", normalized_text.lower())
+        self.assertIn("docs/assets/socratic-learn-hero.png", text)
+        self.assertIn("img.shields.io", text)
+        self.assertGreaterEqual(len(text.splitlines()), 110)
+        self.assertLessEqual(len(text.splitlines()), 170)
+        self.assertIn("```mermaid", text)
+        self.assertNotIn("learner:", normalized_text.lower())
+        self.assertNotIn("tutor:", normalized_text.lower())
 
     def test_manifest_reference_documents_current_behavior_contract(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -523,17 +501,15 @@ class RepositoryValidationTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIn(command, text)
         for clause in (
-            "no repository clone",
-            "does not store provider credentials",
-            "shell history",
+            "open-source agentic learning framework",
+            "does not read or store provider credentials",
             "python 3.11",
             "pipx",
-            "node",
-            "neither ships",
-            "pi, claude code, and antigravity",
-            "cursor remains a project integration",
+            "pi",
+            "claude code",
+            "antigravity",
+            "cursor is a **project integration**",
             "socratic install",
-            "python -m socratic_learn install",
             BRANDED_REPOSITORY_URL.lower(),
         ):
             with self.subTest(clause=clause):
@@ -547,11 +523,11 @@ class RepositoryValidationTests(unittest.TestCase):
         normalized = " ".join(text.split()).lower()
 
         for clause in (
-            "does not mean every host knows every subject",
-            "pipx upgrade socratic-learn",
-            "pipx uninstall socratic-learn",
-            "git ls-files workspace",
-            "workspace/.gitkeep",
+            "does not guarantee accuracy on every topic",
+            "session checkpoints",
+            "thread metadata",
+            "not provider chat logs",
+            "~/.socratic-learn/learning/.socratic-learn/workspace/",
         ):
             with self.subTest(clause=clause):
                 self.assertIn(clause, normalized)
@@ -560,7 +536,7 @@ class RepositoryValidationTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         text = (root / "README.md").read_text(encoding="utf-8")
         quick_start = text.split("## Quick start", 1)[1].split(
-            "## Choose an AI host",
+            "## How a session moves",
             1,
         )[0]
         normalized_quick_start = " ".join(quick_start.split())
@@ -571,8 +547,7 @@ class RepositoryValidationTests(unittest.TestCase):
             'socratic "I want to learn linear algebra"',
             "socratic --agent pi",
             "socratic --here",
-            "pipx install socratic-learn",
-            "npx @socraticlearn/cli",
+            "socratic read https://example.org/article",
         )
         previous = -1
         for marker in ordered_markers:
@@ -602,11 +577,6 @@ class RepositoryValidationTests(unittest.TestCase):
         ):
             with self.subTest(retired=retired):
                 self.assertNotIn(retired, without_fenced_code(quick_start).lower())
-        normalized_lower = quick_start.lower()
-        self.assertLess(
-            normalized_lower.index("npx @socraticlearn/cli"),
-            normalized_lower.index("same python"),
-        )
         self.assertNotRegex(quick_start, r"(?is)menu unless[^.\n]*--here")
         self.assertTrue(text.endswith("\n"))
 
@@ -675,7 +645,7 @@ class RepositoryValidationTests(unittest.TestCase):
         text = text.replace(
             README_TAGLINE,
             "A portable Socratic learning protocol for mathematics and AI.",
-        ).replace("any subject or skill", "mathematics and AI")
+        ).replace("learn any subject", "learn mathematics")
         readme.write_text(text, encoding="utf-8")
 
         self.assertIn(
@@ -686,7 +656,7 @@ class RepositoryValidationTests(unittest.TestCase):
     def test_validator_requires_any_subject_in_readme_opening(self) -> None:
         replacements = (
             (
-                "Turn any AI agent into a tutor that checks whether you actually learned.",
+                README_TAGLINE,
                 "Use a learning protocol with an AI agent.",
             ),
             ("learn any subject", "study selected topics"),
@@ -698,7 +668,7 @@ class RepositoryValidationTests(unittest.TestCase):
                 readme = root / "README.md"
                 opening, marker, remainder = readme.read_text(
                     encoding="utf-8"
-                ).partition("## Why it is different")
+                ).partition("## What you get")
                 self.assertIn(original, opening)
                 readme.write_text(
                     opening.replace(original, replacement) + marker + remainder,
@@ -797,7 +767,7 @@ class RepositoryValidationTests(unittest.TestCase):
                 readme = root / "README.md"
                 text = readme.read_text(encoding="utf-8")
                 opening, heading, remainder = text.partition(
-                    "## Why it is different"
+                    "## What you get"
                 )
                 tagline = f"**{README_TAGLINE}**"
                 before_tagline, separator, after_tagline = opening.partition(
@@ -850,7 +820,7 @@ class RepositoryValidationTests(unittest.TestCase):
                     text = readme.read_text(encoding="utf-8")
                     tagline = f"**{README_TAGLINE}**"
                     opening, heading, remainder = text.partition(
-                        "## Why it is different"
+                        "## What you get"
                     )
                     before, separator, after = opening.partition(tagline)
                     self.assertEqual(separator, tagline)
@@ -900,7 +870,7 @@ class RepositoryValidationTests(unittest.TestCase):
                     text = readme.read_text(encoding="utf-8")
                     tagline = f"**{README_TAGLINE}**"
                     opening, heading, remainder = text.partition(
-                        "## Why it is different"
+                        "## What you get"
                     )
                     before, separator, after = opening.partition(tagline)
                     self.assertEqual(separator, tagline)
@@ -936,8 +906,12 @@ class RepositoryValidationTests(unittest.TestCase):
 
     def test_validator_accepts_inline_html_or_autolink_opening_prose(self) -> None:
         paragraphs = (
-            "<https://example.com> helps people learn any subject.",
-            "<span>Visible</span> agents help people learn any subject.",
+            "<https://example.com> presents this open-source agentic learning "
+            "framework and agent-agnostic tutoring layer to help people learn "
+            "any subject through real application.",
+            "<span>Visible</span> agents use this open-source agentic learning "
+            "framework and agent-agnostic tutoring layer to help people learn "
+            "any subject through real application.",
         )
         for paragraph in paragraphs:
             with self.subTest(paragraph=paragraph):
@@ -989,8 +963,8 @@ class RepositoryValidationTests(unittest.TestCase):
         readme = root / "README.md"
         text = readme.read_text(encoding="utf-8")
         text = text.replace(
-            "I built Socratic Learn out of a recurring need in my work as an AI researcher",
-            "Socratic Learn is a learning tool",
+            "open-source agentic learning framework",
+            "terminal learning tool",
         )
         readme.write_text(text, encoding="utf-8")
 
@@ -998,26 +972,6 @@ class RepositoryValidationTests(unittest.TestCase):
             "README.md is missing portfolio narrative",
             validate(root),
         )
-
-    def test_validator_rejects_missing_research_or_baseline_evidence(self) -> None:
-        replacements = (
-            ("Mahoney et al. (2023)", "A prior study"),
-            ("Lee et al. (2025)", "A recent study"),
-            ("no pedagogy score was assigned", "the sessions were successful"),
-        )
-        for original, replacement in replacements:
-            with self.subTest(original=original):
-                temp, root = self.make_root()
-                self.addCleanup(temp.cleanup)
-                readme = root / "README.md"
-                readme.write_text(
-                    readme.read_text(encoding="utf-8").replace(original, replacement),
-                    encoding="utf-8",
-                )
-                self.assertIn(
-                    "README.md is missing portfolio narrative",
-                    validate(root),
-                )
 
     def test_validator_rejects_each_missing_portfolio_requirement(self) -> None:
         for requirement in README_PORTFOLIO_REQUIREMENTS:
@@ -1045,10 +999,10 @@ class RepositoryValidationTests(unittest.TestCase):
         temp, root = self.make_root()
         self.addCleanup(temp.cleanup)
         readme = root / "README.md"
-        requirement = "three unchanged-protocol Antigravity sessions"
+        requirement = "open-source agentic learning framework"
         text = readme.read_text(encoding="utf-8").replace(
             requirement,
-            "three unchanged-protocol\nAntigravity sessions",
+            "open-source agentic\nlearning framework",
             1,
         )
         readme.write_text(text, encoding="utf-8")
@@ -1133,7 +1087,7 @@ class RepositoryValidationTests(unittest.TestCase):
         readme.write_text(
             replace_requirement_once(
                 readme.read_text(encoding="utf-8"),
-                "Socratic Learn does not store provider credentials",
+                "does not read or store provider credentials",
                 "Authentication is handled elsewhere",
             ),
             encoding="utf-8",
@@ -1283,9 +1237,17 @@ class RepositoryValidationTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         text = (root / "README.md").read_text(encoding="utf-8")
         linked_targets = set(MARKDOWN_LINK_RE.findall(text))
+        pi_targets = set(
+            MARKDOWN_LINK_RE.findall(
+                (root / "adapters/pi/README.md").read_text(encoding="utf-8")
+            )
+        )
 
         self.assertIn("adapters/pi/README.md", linked_targets)
-        self.assertIn(PI_PROJECT_TEMPLATE, linked_targets)
+        self.assertIn(
+            "skills/socratic-learn/SKILL.project.md.template",
+            pi_targets,
+        )
         self.assertNotIn(
             "adapters/pi/skills/socratic-learn/SKILL.md",
             linked_targets,
@@ -1313,7 +1275,7 @@ class RepositoryValidationTests(unittest.TestCase):
     def test_validator_rejects_narrow_skill_positioning(self) -> None:
         temp, root = self.make_root()
         self.addCleanup(temp.cleanup)
-        path = root / ".cursor/skills/socratic-learn/SKILL.md"
+        path = root / "adapters/cursor/skills/socratic-learn/SKILL.md"
         text = path.read_text(encoding="utf-8").replace(
             "for any subject or skill",
             "for mathematics and AI",
@@ -1322,7 +1284,7 @@ class RepositoryValidationTests(unittest.TestCase):
 
         self.assertIn(
             "Narrow product positioning in "
-            ".cursor/skills/socratic-learn/SKILL.md",
+            "adapters/cursor/skills/socratic-learn/SKILL.md",
             validate(root),
         )
 
@@ -2379,24 +2341,14 @@ class RepositoryValidationTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         readme = root / "README.md"
         readme.write_text(
-            readme.read_text(encoding="utf-8").replace(
-                "dependency-light Python 3.11+",
-                "standard-library Python 3.11+",
-                1,
-            ),
+            readme.read_text(encoding="utf-8")
+            + "\nstandard-library Python 3.11+ with native and pipx\n",
             encoding="utf-8",
         )
 
         errors = validate(root)
-        self.assertTrue(
-            any(
-                message in error
-                for error in errors
-                for message in (
-                    "dependency-light runtime with pypdf",
-                    "standard-library-only",
-                )
-            ),
+        self.assertIn(
+            "README.md must not describe the runtime as standard-library-only",
             errors,
         )
 
@@ -2799,16 +2751,15 @@ class RepositoryValidationTests(unittest.TestCase):
         self,
     ) -> None:
         root = Path(__file__).resolve().parents[1]
-        plan = (
-            root
-            / "docs/superpowers/plans/2026-11-06-one-command-learning-launcher.md"
-        ).read_text(encoding="utf-8")
-        commands = re.findall(r"(?m)^python -m build(?:[ \t].*)?$", plan)
-
-        self.assertEqual(
-            ["python -m build --outdir package-dist"] * 3,
-            commands,
+        release = (root / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
         )
+
+        self.assertIn(
+            "python -m build --sdist --wheel --outdir release-dist",
+            release,
+        )
+        self.assertNotIn("python -m build --outdir dist", release)
         self.assertIn("/package-dist/", (root / ".gitignore").read_text("utf-8"))
         self.assertEqual(
             {"manifest.json", "socratic-learn.prompt.md"},
@@ -2816,23 +2767,11 @@ class RepositoryValidationTests(unittest.TestCase):
         )
         self.assertNotEqual("dist", "package-dist")
 
-    def test_validator_rejects_bare_local_build_and_missing_package_ignore(
+    def test_validator_rejects_missing_package_ignore(
         self,
     ) -> None:
         temp, root = self.make_root()
         self.addCleanup(temp.cleanup)
-        plan = (
-            root
-            / "docs/superpowers/plans/2026-11-06-one-command-learning-launcher.md"
-        )
-        plan.write_text(
-            plan.read_text(encoding="utf-8").replace(
-                "python -m build --outdir package-dist",
-                "python -m build",
-                1,
-            ),
-            encoding="utf-8",
-        )
         gitignore = root / ".gitignore"
         gitignore.write_text(
             gitignore.read_text(encoding="utf-8").replace("/package-dist/\n", ""),
@@ -2841,11 +2780,6 @@ class RepositoryValidationTests(unittest.TestCase):
 
         errors = validate(root)
 
-        self.assertIn(
-            "Active local release gates must use "
-            "python -m build --outdir package-dist",
-            errors,
-        )
         self.assertIn(".gitignore must ignore /package-dist/", errors)
 
     def test_validator_rejects_package_artifacts_in_canonical_dist(self) -> None:
@@ -3026,14 +2960,14 @@ class RepositoryValidationTests(unittest.TestCase):
     def test_invalid_skill_frontmatter_fails(self) -> None:
         temp, root = self.make_root()
         self.addCleanup(temp.cleanup)
-        skill = root / ".cursor/skills/socratic-learn/SKILL.md"
+        skill = root / "adapters/cursor/skills/socratic-learn/SKILL.md"
         skill.write_text("---\nname: Socratic Learn\n---\n", encoding="utf-8")
         self.assertTrue(any("frontmatter" in error for error in validate(root)))
 
     def test_unrelated_skill_name_fails_with_existing_diagnostic(self) -> None:
         temp, root = self.make_root()
         self.addCleanup(temp.cleanup)
-        skill = root / ".cursor/skills/socratic-learn/SKILL.md"
+        skill = root / "adapters/cursor/skills/socratic-learn/SKILL.md"
         skill.write_text(
             "---\n"
             "name: unrelated-skill\n"
@@ -3042,7 +2976,8 @@ class RepositoryValidationTests(unittest.TestCase):
             encoding="utf-8",
         )
         self.assertIn(
-            "Invalid skill frontmatter: .cursor/skills/socratic-learn/SKILL.md",
+            "Invalid skill frontmatter: "
+            "adapters/cursor/skills/socratic-learn/SKILL.md",
             validate(root),
         )
 
@@ -3427,6 +3362,31 @@ class RepositoryValidationTests(unittest.TestCase):
         (root / ".gitignore").write_text("workspace/*\n", encoding="utf-8")
         self.assertTrue(any(".gitignore" in error for error in validate(root)))
 
+    def test_validator_rejects_tracked_non_product_artifacts(self) -> None:
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+        tracked = {
+            "README.md",
+            ".cursor/skills/local/SKILL.md",
+            ".superpowers/sdd/report.md",
+            "docs/superpowers/specs/internal.md",
+            "packages/pixel-scenes/README.md",
+        }
+        with patch(
+            "tests.validate_repository.tracked_files",
+            return_value=(tracked, None),
+        ):
+            errors = validate(root)
+
+        self.assertIn(
+            "Tracked non-product artifacts: "
+            ".cursor/skills/local/SKILL.md, "
+            ".superpowers/sdd/report.md, "
+            "docs/superpowers/specs/internal.md, "
+            "packages/pixel-scenes/README.md",
+            errors,
+        )
+
     def test_main_returns_zero_and_prints_success(self) -> None:
         output = StringIO()
         with patch("tests.validate_repository.validate", return_value=[]):
@@ -3564,35 +3524,12 @@ class PortableSessionMemoryDocumentationTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         readme = root / "README.md"
         text = readme.read_text(encoding="utf-8")
-        target = "Host chat logs are not used as session memory."
+        target = "not provider chat logs"
         readme.write_text(
             mutate_once(
                 text,
                 target,
-                "Host chat logs are used as session memory.",
-            ),
-            encoding="utf-8",
-        )
-        self.assertIn(
-            "README.md is missing portable session memory guidance",
-            validate(root),
-        )
-
-    def test_validator_rejects_session_control_disk_persistence_claim(self) -> None:
-        temp, root = RepositoryValidationTests.make_root(self)
-        self.addCleanup(temp.cleanup)
-        readme = root / "README.md"
-        text = readme.read_text(encoding="utf-8")
-        target = (
-            "assembles a transient session-control payload in memory for the host "
-            "process and does not persist that JSON on disk."
-        )
-        readme.write_text(
-            mutate_once(
-                text,
-                target,
-                "assembles a persistent session-control payload on disk for the host "
-                "process and persists that JSON on disk.",
+                "provider chat logs",
             ),
             encoding="utf-8",
         )
@@ -3627,148 +3564,29 @@ class PortableSessionMemoryDocumentationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             mutate_once("alpha alpha", "alpha", "beta")
 
-    def _mutate_readme_quick_start(
-        self,
-        root: Path,
-        *,
-        old: str,
-        new: str,
-    ) -> None:
-        readme = root / "README.md"
-        text = readme.read_text(encoding="utf-8")
-        mutated = mutate_once(text, old, new)
-        self.assertNotEqual(text, mutated)
-        readme.write_text(mutated, encoding="utf-8")
-
-    def test_validator_rejects_missing_arrow_navigation(self) -> None:
-        temp, root = RepositoryValidationTests.make_root(self)
-        self.addCleanup(temp.cleanup)
-        self._mutate_readme_quick_start(
-            root,
-            old="move with the arrow keys and press Enter",
-            new="choose a menu row by typing its number",
+    def test_validator_rejects_missing_public_resume_markers(self) -> None:
+        replacements = (
+            ("new session", "fresh start"),
+            ("recent threads", "saved work"),
+            ("structured summaries", "provider transcripts"),
         )
-        self.assertIn(
-            "README.md is missing portable session memory guidance",
-            validate(root),
-        )
-
-    def test_validator_rejects_missing_numbered_fallback(self) -> None:
-        temp, root = RepositoryValidationTests.make_root(self)
-        self.addCleanup(temp.cleanup)
-        self._mutate_readme_quick_start(
-            root,
-            old="pick from the numbered list.",
-            new="the menu cannot be used without a pointer device.",
-        )
-        self.assertIn(
-            "README.md is missing portable session memory guidance",
-            validate(root),
-        )
-
-    def test_validator_rejects_missing_explicit_goal_bypass(self) -> None:
-        temp, root = RepositoryValidationTests.make_root(self)
-        self.addCleanup(temp.cleanup)
-        self._mutate_readme_quick_start(
-            root,
-            old="Supply a goal on the command line to skip the menu,",
-            new="Supply a goal on the command line,",
-        )
-        self.assertIn(
-            "README.md is missing portable session memory guidance",
-            validate(root),
-        )
-
-    def test_validator_rejects_missing_socratic_read_bypass(self) -> None:
-        temp, root = RepositoryValidationTests.make_root(self)
-        self.addCleanup(temp.cleanup)
-        self._mutate_readme_quick_start(
-            root,
-            old="or run `socratic read` with a source to skip the menu entirely.",
-            new="or run `socratic read` with a source.",
-        )
-        self.assertIn(
-            "README.md is missing portable session memory guidance",
-            validate(root),
-        )
-
-    def test_validator_rejects_missing_thread_metadata_persistence(self) -> None:
-        temp, root = RepositoryValidationTests.make_root(self)
-        self.addCleanup(temp.cleanup)
-        self._mutate_readme_quick_start(
-            root,
-            old="Thread metadata and structured checkpoint files do persist,",
-            new="Structured checkpoint files do persist,",
-        )
-        self.assertIn(
-            "README.md is missing portable session memory guidance",
-            validate(root),
-        )
-
-    def test_validator_rejects_missing_checkpoint_persistence(self) -> None:
-        temp, root = RepositoryValidationTests.make_root(self)
-        self.addCleanup(temp.cleanup)
-        self._mutate_readme_quick_start(
-            root,
-            old="Thread metadata and structured checkpoint files do persist,",
-            new="Thread metadata does persist,",
-        )
-        self.assertIn(
-            "README.md is missing portable session memory guidance",
-            validate(root),
-        )
-
-    def test_validator_rejects_missing_immutable_encounters(self) -> None:
-        temp, root = RepositoryValidationTests.make_root(self)
-        self.addCleanup(temp.cleanup)
-        self._mutate_readme_quick_start(
-            root,
-            old="Completed encounters in a thread stay immutable once written.",
-            new="Completed encounters in a thread stay editable once written.",
-        )
-        self.assertIn(
-            "README.md is missing portable session memory guidance",
-            validate(root),
-        )
-
-    def test_validator_rejects_raw_transcript_storage_claim(self) -> None:
-        temp, root = RepositoryValidationTests.make_root(self)
-        self.addCleanup(temp.cleanup)
-        self._mutate_readme_quick_start(
-            root,
-            old="does not keep raw host transcripts",
-            new="keeps raw host transcripts",
-        )
-        self.assertIn(
-            "README.md is missing portable session memory guidance",
-            validate(root),
-        )
-
-    def test_validator_rejects_provider_credential_storage_claim(self) -> None:
-        temp, root = RepositoryValidationTests.make_root(self)
-        self.addCleanup(temp.cleanup)
-        self._mutate_readme_quick_start(
-            root,
-            old="does not keep raw host transcripts, provider credentials, or provider ids.",
-            new="keeps raw host transcripts, provider credentials, and provider ids.",
-        )
-        self.assertIn(
-            "README.md is missing portable session memory guidance",
-            validate(root),
-        )
-
-    def test_validator_rejects_provider_id_storage_claim(self) -> None:
-        temp, root = RepositoryValidationTests.make_root(self)
-        self.addCleanup(temp.cleanup)
-        self._mutate_readme_quick_start(
-            root,
-            old=", or provider ids.",
-            new=".",
-        )
-        self.assertIn(
-            "README.md is missing portable session memory guidance",
-            validate(root),
-        )
+        for old, new in replacements:
+            with self.subTest(marker=old):
+                temp, root = RepositoryValidationTests.make_root(self)
+                self.addCleanup(temp.cleanup)
+                readme = root / "README.md"
+                readme.write_text(
+                    mutate_once(
+                        readme.read_text(encoding="utf-8"),
+                        old,
+                        new,
+                    ),
+                    encoding="utf-8",
+                )
+                self.assertIn(
+                    "README.md is missing portable session memory guidance",
+                    validate(root),
+                )
 
 
 class SynchronizedRegistryReleaseTests(unittest.TestCase):

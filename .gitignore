@@ -17,6 +17,9 @@ __pycache__/
 /dist/*.tar.gz
 
 /.semantic-runs/
+/.cursor/
+/.superpowers/
+/docs/superpowers/
 
 packages/npm-cli/vendor/
 packages/npm-cli/*.tgz

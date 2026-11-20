@@ -35,8 +35,8 @@ REQUIRED_PATHS = (
     "templates/learning-goal.md",
     "templates/session-log.md",
     "templates/progress.md",
-    ".cursor/skills/socratic-learn/SKILL.md",
     "adapters/cursor/README.md",
+    "adapters/cursor/skills/socratic-learn/SKILL.md",
     "adapters/claude-code/CLAUDE.md",
     "adapters/claude-code/README.md",
     "adapters/pi/skills/socratic-learn/SKILL.md",
@@ -68,14 +68,10 @@ REQUIRED_PATHS = (
     "docs/launcher-adapters.md",
     "docs/manifest-reference.md",
     "docs/adding-an-adapter.md",
-    "docs/superpowers/specs/2026-11-05-universal-distribution-design.md",
-    "docs/superpowers/plans/2026-11-05-universal-distribution.md",
-    "docs/superpowers/specs/2026-11-05-socratic-learn-rename-design.md",
-    "docs/superpowers/plans/2026-11-05-socratic-learn-rename.md",
+    "docs/source-study.md",
     ".github/workflows/native-python.yml",
     "pyproject.toml",
     ".github/workflows/release.yml",
-    "docs/superpowers/plans/2026-11-06-one-command-learning-launcher.md",
 )
 RETIRED_NATIVE_RELEASE_TERMS = (
     "pyinstaller",
@@ -86,43 +82,32 @@ RETIRED_NATIVE_RELEASE_TERMS = (
     "socratic_learn.release",
 )
 SKILL_PATHS = (
-    ".cursor/skills/socratic-learn/SKILL.md",
+    "adapters/cursor/skills/socratic-learn/SKILL.md",
     "adapters/pi/skills/socratic-learn/SKILL.md",
 )
 POSITIONING_SKILL_PATHS = (
-    ".cursor/skills/socratic-learn/SKILL.md",
+    "adapters/cursor/skills/socratic-learn/SKILL.md",
     "adapters/pi/skills/socratic-learn/SKILL.md",
     "adapters/pi/skills/socratic-learn/SKILL.project.md.template",
     "socratic_learn/templates/cursor-skill.md",
     "socratic_learn/templates/pi-skill.md",
 )
 README_POSITIONING_REQUIREMENTS = (
-    "any subject or skill",
+    "open-source agentic learning framework",
+    "agent-agnostic tutoring layer",
+    "any subject",
     "starter curricula",
 )
-README_TAGLINE = (
-    "Turn any AI agent into a tutor that checks whether you actually learned."
-)
+README_TAGLINE = "Learn any subject. Prove it by doing."
 README_OPENING_PROMISE = "learn any subject"
 README_UNFRIENDLY_DASHES = ("—", "–")
 README_PORTFOLIO_REQUIREMENTS = (
-    "I built Socratic Learn out of a recurring need in my work as an AI researcher",
-    "objective → prerequisites → guided route → application → evidence",
-    "Mahoney et al. (2023)",
-    "Munshi et al. (2023)",
-    "Borchers et al. (2025)",
-    "van den Broek et al. (2025)",
-    "Stogniy et al. (2020)",
-    "Lee et al. (2025)",
-    "https://doi.org/10.1016/j.tsc.2023.101422",
-    "https://doi.org/10.1111/jcal.12761",
-    "https://doi.org/10.1016/j.compedu.2025.105364",
-    "https://doi.org/10.1016/j.learninstruc.2025.102196",
-    "https://doi.org/10.1096/fasebj.2020.34.s1.04148",
-    "https://doi.org/10.48550/arXiv.2509.16262",
-    "three unchanged-protocol Antigravity sessions",
-    "no pedagogy score was assigned",
-    "evaluation/reports/2026-11-06-antigravity-baseline.md",
+    "open-source agentic learning framework",
+    "agent-agnostic tutoring layer",
+    "real application",
+    "private learner records",
+    "source-bounded study",
+    "research cited in the docs informed design choices",
 )
 _MARKDOWN_WHITESPACE = r"[ \t\r\n]+"
 _PRODUCT_NAME = rf"Socratic{_MARKDOWN_WHITESPACE}Learn"
@@ -189,11 +174,6 @@ RUNTIME_DEPENDENCIES = [
     RUNTIME_VERSION_DEPENDENCY,
     RUNTIME_PDF_DEPENDENCY,
 ]
-README_RUNTIME_REQUIREMENTS = (
-    "dependency-light python 3.11+",
-    "pypdf",
-    "textual pdf extraction",
-)
 WHEEL_READ_SMOKE_MARKERS = (
     "tests.read_smoke",
     "run_wheel_read_smoke",
@@ -204,7 +184,7 @@ INTERPRETER_ONLY_PDF_SMOKE_MARKERS = (
     "from pypdf import PdfReader",
     "PdfReader",
 )
-README_READ_REQUIREMENTS = (
+SOURCE_STUDY_REQUIREMENTS = (
     "socratic read https://example.org/article",
     "socratic read paper.pdf",
     "socratic read --agent pi",
@@ -237,7 +217,7 @@ README_READ_REQUIREMENTS = (
     "image-only",
     "dynamic pages",
     "quota",
-    "changing agents",
+    "change agents",
 )
 README_STANDARD_LIBRARY_RUNTIME_CLAIM = (
     "standard-library python 3.11+ with native and pipx"
@@ -250,25 +230,15 @@ README_LAUNCHER_REQUIREMENTS = (
     'pipx install "git+https://github.com/socraticlearn/socratic-learn.git"',
     "pipx install socratic-learn",
     "npx @socraticlearn/cli",
-    "pipx upgrade socratic-learn",
-    "pipx uninstall socratic-learn",
-    "no repository clone",
-    "does not store provider credentials",
-    "shell history",
     "python 3.11",
     "pipx",
-    "node",
-    "neither ships",
-    "pi, claude code, and antigravity",
-    "cursor remains a project integration",
+    "pi",
+    "claude code",
+    "antigravity",
+    "cursor",
     "socratic install",
-    "python -m socratic_learn install",
-    "preserves learner",
+    "does not read or store provider credentials",
     "https://github.com/socraticlearn/socratic-learn",
-)
-README_SHARED_RUNTIME_MARKERS = (
-    "npx @socraticlearn/cli",
-    "same python",
 )
 MENU_SKIP_HERE_PATTERN = re.compile(
     r"menu unless[^.\n]*--here",
@@ -324,95 +294,11 @@ SESSION_PROTOCOL_PORTABLE_PATTERNS = (
 )
 README_PORTABLE_SESSION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("menu new session", re.compile(r"\bnew session\b", re.IGNORECASE)),
-    (
-        "five recent saved entries",
-        re.compile(r"five most recent saved", re.IGNORECASE),
-    ),
-    (
-        "legacy session import",
-        re.compile(
-            r"legacy session record.{0,160}(import|choosing|selected)",
-            re.IGNORECASE | re.DOTALL,
-        ),
-    ),
-    ("view all", re.compile(r"view all", re.IGNORECASE)),
-    ("arrow navigation", re.compile(r"arrow keys", re.IGNORECASE)),
-    ("numbered fallback", re.compile(r"numbered list", re.IGNORECASE)),
-    (
-        "explicit goal bypass",
-        re.compile(
-            r"supply a goal on the command line to skip the menu",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "socratic read bypass",
-        re.compile(
-            r"socratic read.{0,100}skip the menu",
-            re.IGNORECASE | re.DOTALL,
-        ),
-    ),
-    (
-        "transient session control",
-        re.compile(
-            r"(transient session[- ]control|session[- ]control.{0,80}"
-            r"(memory|does not persist|not persist))",
-            re.IGNORECASE | re.DOTALL,
-        ),
-    ),
-    (
-        "thread metadata persistence",
-        re.compile(
-            r"thread metadata.{0,80}persist",
-            re.IGNORECASE | re.DOTALL,
-        ),
-    ),
-    (
-        "checkpoint persistence",
-        re.compile(
-            r"(structured )?checkpoint.{0,80}persist",
-            re.IGNORECASE | re.DOTALL,
-        ),
-    ),
-    (
-        "immutable encounters",
-        re.compile(
-            r"(encounters|prior encounters).{0,60}immutable",
-            re.IGNORECASE | re.DOTALL,
-        ),
-    ),
-    (
-        "workspace not only thread files",
-        re.compile(
-            r"(other private learner|along with other|already in the workspace)",
-            re.IGNORECASE,
-        ),
-    ),
+    ("recent threads", re.compile(r"\brecent threads\b", re.IGNORECASE)),
+    ("structured summaries", re.compile(r"structured summaries", re.IGNORECASE)),
     (
         "host chat exclusion",
-        re.compile(r"host chat logs are not used", re.IGNORECASE),
-    ),
-    ("incomplete thread", re.compile(r"\bincomplete\b", re.IGNORECASE)),
-    (
-        "raw transcript exclusion",
-        re.compile(
-            r"does not keep raw host transcripts",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "credential exclusion",
-        re.compile(
-            r"does not keep.{0,80}provider credentials",
-            re.IGNORECASE | re.DOTALL,
-        ),
-    ),
-    (
-        "provider id exclusion",
-        re.compile(
-            r"does not keep.{0,80}provider ids",
-            re.IGNORECASE | re.DOTALL,
-        ),
+        re.compile(r"not provider chat logs", re.IGNORECASE),
     ),
 )
 LAUNCHER_SESSION_CONTROL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -498,8 +384,7 @@ README_ONBOARDING_ORDER = (
     'socratic "i want to learn linear algebra"',
     "socratic --agent pi",
     "socratic --here",
-    "pipx install socratic-learn",
-    "npx @socraticlearn/cli",
+    "socratic read https://example.org/article",
 )
 RETIRED_ACTIVE_INSTALLATION_TERMS = (
     "install.ps1",
@@ -520,7 +405,7 @@ ACTIVE_INSTALLATION_SURFACES = (
     (
         "README.md",
         "## Quick start",
-        "## Choose an AI host",
+        "## How a session moves",
     ),
     (
         "docs/universal-installation.md",
@@ -566,8 +451,10 @@ LAUNCHER_ADAPTER_REQUIREMENTS = (
     "`pi`",
     "`claude`",
     "`agy`",
+    "pi --append-system-prompt protocol -- launch_payload",
+    "claude --append-system-prompt-file protocol -- launch_payload",
 )
-ADAPTER_ROOTS = (".cursor", "adapters")
+ADAPTER_ROOTS = ("adapters",)
 LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 CANONICAL_RE = re.compile(
     r"<!-- canonical:start -->(.*?)<!-- canonical:end -->",
@@ -587,10 +474,7 @@ UNIVERSAL_VALIDATION_INPUTS = (
     "curricula/ai/map.md",
 )
 POSIX_THREAT_MODEL_PATHS = (
-    "README.md",
     "docs/universal-installation.md",
-    "docs/superpowers/specs/2026-11-05-universal-distribution-design.md",
-    "docs/superpowers/plans/2026-11-05-universal-distribution.md",
 )
 POSIX_THREAT_MODEL_TERMS = (
     "ordinary collisions",
@@ -599,19 +483,14 @@ POSIX_THREAT_MODEL_TERMS = (
     "same os principal",
     "leaf-entry toctou",
 )
-POSIX_THREAT_MODEL_README_TERMS = (
-    "ordinary collisions",
-    "accidental concurrent changes",
-    "cooperating socratic learn processes",
-    "same os user",
-    "final-path toctou",
-)
 IMPOSSIBLE_SAFETY_CLAIM = "no external data was deleted"
-LOCAL_RELEASE_PLAN = (
-    "docs/superpowers/plans/2026-11-06-one-command-learning-launcher.md"
-)
-LOCAL_PACKAGE_BUILD_COMMAND = "python -m build --outdir package-dist"
 CANONICAL_DIST_FILES = {"manifest.json", "socratic-learn.prompt.md"}
+NON_PRODUCT_TRACKED_ROOTS = (
+    ".cursor/",
+    ".superpowers/",
+    "docs/superpowers/",
+    "packages/pixel-scenes/",
+)
 RUNTIME_WORKSPACE_MARKERS = (".socratic-learn",)
 TRACKED_EVALUATION_ASSET_ROOTS = (
     "evaluation/fixtures/antigravity/",
@@ -621,26 +500,22 @@ TRACKED_EVALUATION_ASSET_ROOTS = (
 
 def markdown_files(root: Path) -> list[Path]:
     tracked, git_error = tracked_files(root)
-    files: list[Path] = []
-    for path in root.rglob("*.md"):
-        relative = path.relative_to(root)
-        # Untracked task-* files are controller scratch payloads, not repository
-        # documentation. Tracked task history and universal-task-* reports stay
-        # in validation.
-        untracked_controller_scratch = (
-            git_error is None
-            and relative.parent.as_posix() == ".superpowers/sdd"
-            and relative.as_posix() not in tracked
+    if git_error is None and tracked:
+        candidates = (
+            root / relative
+            for relative in sorted(tracked)
+            if relative.endswith(".md")
         )
-        if (
-            path.is_file()
-            and ".git" not in relative.parts
-            and "workspace" not in relative.parts
-            and "vendor" not in relative.parts
-            and not untracked_controller_scratch
-        ):
-            files.append(path)
-    return files
+    else:
+        candidates = root.rglob("*.md")
+    return [
+        path
+        for path in candidates
+        if path.is_file()
+        and ".git" not in path.relative_to(root).parts
+        and "workspace" not in path.relative_to(root).parts
+        and "vendor" not in path.relative_to(root).parts
+    ]
 
 
 def without_fenced_code(text: str) -> str:
@@ -706,11 +581,7 @@ def markdown_section(text: str, heading: str, *, until: str | None = None) -> st
 
 
 def readme_portable_session_section(readme_text: str) -> str:
-    return markdown_section(
-        readme_text,
-        "Quick start",
-        until="Choose an AI host",
-    )
+    return readme_text
 
 
 def check_document_patterns(
@@ -2100,20 +1971,6 @@ def validate_release_automation(root: Path) -> list[str]:
 
 def validate_local_release_gate(root: Path) -> list[str]:
     errors: list[str] = []
-    plan_path = root / LOCAL_RELEASE_PLAN
-    if plan_path.is_file():
-        commands = re.findall(
-            r"(?m)^python -m build(?:[ \t].*)?$",
-            plan_path.read_text(encoding="utf-8"),
-        )
-        if not commands or any(
-            command != LOCAL_PACKAGE_BUILD_COMMAND for command in commands
-        ):
-            errors.append(
-                "Active local release gates must use "
-                f"{LOCAL_PACKAGE_BUILD_COMMAND}"
-            )
-
     dist = root / "dist"
     if dist.is_dir():
         actual = {path.name for path in dist.iterdir()}
@@ -2146,10 +2003,10 @@ def validate(root: Path) -> list[str]:
     readme = root / "README.md"
     if readme.is_file():
         readme_text = readme.read_text(encoding="utf-8")
-        readme_opening = readme_text.split("## Why it is different", 1)[0]
+        readme_opening = readme_text.split("## What you get", 1)[0]
         first_prose_paragraph = readme_opening_prose_paragraph(readme_opening)
         if not all(
-            phrase.lower() in readme_text.lower()
+            normalize(phrase).lower() in normalize(readme_text).lower()
             for phrase in README_POSITIONING_REQUIREMENTS
         ) or (
             README_OPENING_PROMISE
@@ -2166,36 +2023,10 @@ def validate(root: Path) -> list[str]:
             errors.append("README.md is missing portfolio narrative")
         if contains_unsupported_effectiveness_claim(readme_text):
             errors.append("README.md contains an unsupported effectiveness claim")
-        engineering = readme_text.split("## Technical documentation", 1)
-        engineering_text = normalize(
-            engineering[1].split("## License", 1)[0]
-            if len(engineering) == 2
-            else ""
-        ).lower()
-        if not all(
-            requirement in engineering_text
-            for requirement in README_RUNTIME_REQUIREMENTS
-        ):
-            errors.append(
-                "README.md engineering evidence must describe a dependency-light "
-                "runtime with pypdf"
-            )
-        if README_STANDARD_LIBRARY_RUNTIME_CLAIM in engineering_text:
+        if README_STANDARD_LIBRARY_RUNTIME_CLAIM in normalize(readme_text).lower():
             errors.append(
                 "README.md must not describe the runtime as standard-library-only"
             )
-        read_section = readme_text.split("## Learn from an article", 1)
-        read_text = (
-            read_section[1].split("## How the method works", 1)[0]
-            if len(read_section) == 2
-            else ""
-        )
-        normalized_read = normalize(read_text).lower()
-        if not all(
-            requirement in normalized_read
-            for requirement in README_READ_REQUIREMENTS
-        ):
-            errors.append("README.md is missing source-grounded reading guidance")
         if not all(
             requirement in normalized_readme
             for requirement in README_LAUNCHER_REQUIREMENTS
@@ -2203,7 +2034,7 @@ def validate(root: Path) -> list[str]:
             errors.append("README.md is missing public launcher onboarding")
         quick_start = readme_text.split("## Quick start", 1)
         quick_start_text = (
-            quick_start[1].split("## Choose an AI host", 1)[0]
+            quick_start[1].split("## How a session moves", 1)[0]
             if len(quick_start) == 2
             else ""
         )
@@ -2216,20 +2047,23 @@ def validate(root: Path) -> list[str]:
             or order_positions != sorted(order_positions)
         ):
             errors.append("README.md public onboarding is out of order")
-        shared_runtime = quick_start_text.lower()
-        if all(marker in shared_runtime for marker in README_SHARED_RUNTIME_MARKERS):
-            if shared_runtime.index("npx @socraticlearn/cli") > shared_runtime.index(
-                "same python"
-            ):
-                errors.append(
-                    "README.md must explain shared runtime after the npx route"
-                )
         if MENU_SKIP_HERE_PATTERN.search(quick_start_text):
             errors.append(
                 "README.md must not claim --here skips the session menu"
             )
         if not readme_text.endswith("\n"):
             errors.append("README.md must end with a trailing newline")
+
+    source_study = root / "docs/source-study.md"
+    if source_study.is_file():
+        source_text = normalize(
+            source_study.read_text(encoding="utf-8")
+        ).lower()
+        if not all(
+            requirement in source_text
+            for requirement in SOURCE_STUDY_REQUIREMENTS
+        ):
+            errors.append("docs/source-study.md is missing source-study guidance")
 
     for relative, section_start, section_end in ACTIVE_INSTALLATION_SURFACES:
         path = root / relative
@@ -2324,13 +2158,8 @@ def validate(root: Path) -> list[str]:
         if not path.is_file():
             continue
         text = normalize(path.read_text(encoding="utf-8")).lower()
-        required_terms = (
-            POSIX_THREAT_MODEL_README_TERMS
-            if relative == "README.md"
-            else POSIX_THREAT_MODEL_TERMS
-        )
         missing = [
-            term for term in required_terms if term not in text
+            term for term in POSIX_THREAT_MODEL_TERMS if term not in text
         ]
         if missing:
             errors.append(
@@ -2439,6 +2268,13 @@ def validate(root: Path) -> list[str]:
             errors.append(".gitignore must ignore /package-dist/")
         if "/.semantic-runs/" not in rules:
             errors.append(".gitignore must ignore /.semantic-runs/")
+        for required in (
+            "/.cursor/",
+            "/.superpowers/",
+            "/docs/superpowers/",
+        ):
+            if required not in rules:
+                errors.append(f".gitignore must ignore {required}")
 
     gitattributes = root / ".gitattributes"
     if gitattributes.is_file():
@@ -2463,6 +2299,15 @@ def validate(root: Path) -> list[str]:
         errors.append(
             "Tracked raw semantic evaluation files: "
             + ", ".join(tracked_semantic_raw)
+        )
+    tracked_non_product = sorted(
+        path
+        for path in tracked
+        if path.startswith(NON_PRODUCT_TRACKED_ROOTS)
+    )
+    if tracked_non_product:
+        errors.append(
+            "Tracked non-product artifacts: " + ", ".join(tracked_non_product)
         )
     for relative in sorted(tracked):
         if not relative.startswith(TRACKED_EVALUATION_ASSET_ROOTS):

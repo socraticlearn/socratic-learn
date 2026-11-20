@@ -22,8 +22,8 @@ saves the result in `~/.socratic-learn/config.json`.
 The launcher passes an argument vector directly to the child process; it does
 not interpolate a shell command.
 
-- Pi: `pi --append-system-prompt PROTOCOL LAUNCH_PAYLOAD`
-- Claude Code: `claude --append-system-prompt-file PROTOCOL LAUNCH_PAYLOAD`
+- Pi: `pi --append-system-prompt PROTOCOL -- LAUNCH_PAYLOAD`
+- Claude Code: `claude --append-system-prompt-file PROTOCOL -- LAUNCH_PAYLOAD`
 - Antigravity: `agy --prompt-interactive BOOTSTRAP`
 
 `PROTOCOL` is the absolute path to the prepared
@@ -121,8 +121,8 @@ When it is supplied, the launch payload begins with:
 
 followed by the exact `source_study_payload`, then the session control block.
 
-- Pi: `pi --append-system-prompt PROTOCOL LAUNCH_PAYLOAD`
-- Claude Code: `claude --append-system-prompt-file PROTOCOL LAUNCH_PAYLOAD`
+- Pi: `pi --append-system-prompt PROTOCOL -- LAUNCH_PAYLOAD`
+- Claude Code: `claude --append-system-prompt-file PROTOCOL -- LAUNCH_PAYLOAD`
 - Antigravity: `agy --prompt-interactive BOOTSTRAP`
 
 For Antigravity read mode, `BOOTSTRAP` is the JSON protocol-path prefix and

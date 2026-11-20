@@ -18,6 +18,9 @@ entries, and legacy imports. Pi, Claude Code, or Antigravity must already be
 installed and authenticated; Socratic Learn does not bundle a host, model,
 provider, or credentials.
 
+Use the arrow keys and Enter on a capable terminal. A numbered list is used
+when interactive navigation is unavailable.
+
 ## Future package channels
 
 The PyPI package is not public yet. The npm package is not public yet. After the
