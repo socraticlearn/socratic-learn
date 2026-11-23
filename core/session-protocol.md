@@ -120,6 +120,14 @@ preference, personal trade-off, or stored personal context.
 
 ## 5. Close and persist
 
+Before writing the session record, reconcile established concepts, application
+evidence, remaining gaps, the next step, and source or uncertainty notes.
+Resolved gaps must be removed or rewritten. The next step may not target work
+already established. Preserve honest partial outcomes.
+
+Describe closure in terms of observed learner acts, recorded applications, and
+remaining limits rather than claiming broad mastery of the whole objective.
+
 Close with the outcome, diagnostic evidence, the learning route traversed,
 concepts established, application evidence, remaining gaps, one next step, and
 sources. When studying a supplied source, also close with what the source

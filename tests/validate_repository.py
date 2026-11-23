@@ -14,6 +14,8 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
+from socratic_learn import PROTOCOL_VERSION
+from socratic_learn.conformance import CONFORMANCE_CONTRACT_VERSION
 from socratic_learn.build import build_distribution
 from socratic_learn.errors import LearningTutorError
 from socratic_learn.manifest import validate_manifest
@@ -386,7 +388,7 @@ MANIFEST_REFERENCE_TOP_LEVEL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] =
     (
         "protocol version",
         re.compile(
-            r"`protocol_version`: exact protocol version `1\.3\.0`",
+            rf"`protocol_version`: exact protocol version `{re.escape(PROTOCOL_VERSION)}`",
             re.IGNORECASE,
         ),
     ),
@@ -394,10 +396,20 @@ MANIFEST_REFERENCE_TOP_LEVEL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] =
 MANIFEST_REFERENCE_CONFORMANCE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "conformance version",
-        re.compile(r"`conformance\.version` is integer `5`", re.IGNORECASE),
+        re.compile(
+            rf"`conformance\.version` is integer `{CONFORMANCE_CONTRACT_VERSION}`",
+            re.IGNORECASE,
+        ),
     ),
 )
 MANIFEST_REFERENCE_VERSION_POLICY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "accepted protocol version",
+        re.compile(
+            rf"protocol `{re.escape(PROTOCOL_VERSION)}`",
+            re.IGNORECASE,
+        ),
+    ),
     (
         "exact conformance requirement",
         re.compile(

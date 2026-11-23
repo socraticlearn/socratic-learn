@@ -12,7 +12,7 @@ python -m socratic_learn build
 
 - `schema_version`: integer `2`. Readers reject other schema versions.
 - `product`: exact identifier `socratic-learn`.
-- `protocol_version`: exact protocol version `1.3.0`. Protocol behavior changes
+- `protocol_version`: exact protocol version `1.4.0`. Protocol behavior changes
   require an explicit version change and compatible readers.
 - `language`: `en`, identifying the language of generated instructions.
 - `targets`: the ordered array `generic`, `cursor`, `claude-code`, and `pi`.
@@ -51,7 +51,7 @@ verify the bundle hash before planning any publication.
 
 ## Conformance and session fields
 
-`conformance.version` is integer `5`.
+`conformance.version` is integer `6`.
 `conformance.required_diagnostic_codes` is the exact ordered set of behavioral
 checks enforced by the builder, including observable outcome, bounded
 diagnosis, responsive follow-up, active return after exposition, evidence-based
@@ -62,8 +62,9 @@ self-review, autonomous current-information research, focused learner task,
 source-study epistemic distinction, source-study external-verification gate,
 source nonexistence caution, selective source access, untrusted source material,
 source learner locations, source objective before summary, source-aware
-closure, launcher-checkpoint-close, session-title-subject-focus, and
-launcher-resume-evidence-boundary.
+closure, launcher-checkpoint-close, session-title-subject-focus,
+launcher-resume-evidence-boundary, factual-precision, independent-establishment,
+and record-reconciliation.
 
 `session_headings` contains these exact values in order:
 
@@ -92,7 +93,7 @@ checked-in manifest. An older installed copy with a lower conformance version is
 not silently treated as current; refresh or rebuild before assuming the latest
 contract set.
 
-This release accepts only schema `2` and protocol `1.3.0` in the repository
+This release accepts only schema `2` and protocol `1.4.0` in the repository
 validator; it does not silently migrate unknown versions. Generated artifacts,
 install receipts, and runtime code must agree before installation or update.
 

@@ -1,7 +1,7 @@
 {
   "bundle": {
     "path": "socratic-learn.prompt.md",
-    "sha256": "8c5a828fa64181fff881052f1f75b11554617f394ae94061f89b2da445f01ce9"
+    "sha256": "55fe219f5fd8961914853a0be8c755523e3b2a7d8928abac70fd3f4346138b9c"
   },
   "capability_fallbacks": {
     "cross_session_memory": "Ask for a prior summary and state what is unknown.",
@@ -21,8 +21,10 @@
       "connected-perspectives",
       "evidence-based-closure",
       "exposition-fallback",
+      "factual-precision",
       "focused-learner-task",
       "graduated-support",
+      "independent-establishment",
       "launcher-checkpoint-close",
       "launcher-resume-evidence-boundary",
       "mathematical-assumptions-classification",
@@ -31,6 +33,7 @@
       "preference-not-prerequisite-evidence",
       "private-state",
       "productive-effort",
+      "record-reconciliation",
       "responsive-socratic-follow-up",
       "resumable-retrieval",
       "session-support-calibration",
@@ -49,11 +52,11 @@
       "vocabulary-readiness",
       "volatile-primary-source-verification"
     ],
-    "version": 5
+    "version": 6
   },
   "language": "en",
   "product": "socratic-learn",
-  "protocol_version": "1.3.0",
+  "protocol_version": "1.4.0",
   "schema_version": 2,
   "session_headings": [
     "## Outcome",
@@ -68,15 +71,15 @@
   "sources": [
     {
       "path": "core/pedagogy.md",
-      "sha256": "b1c2a3a475b4a4d0cb284e050d90f917b30c19597c43313006190dc43f3303b8"
+      "sha256": "740a642a491c842209f2ad09b22c5af069a623f6abc7646afbc83bd801e2b20a"
     },
     {
       "path": "core/session-protocol.md",
-      "sha256": "4a6faf5b482e4512872a3254cba385a49943fb1489923d98fba8400a59379fe8"
+      "sha256": "771bf095e28b876a8a97aff0b4e01c3c4b81399f332dec242e64055a30eb3de3"
     },
     {
       "path": "core/assessment.md",
-      "sha256": "fbfb047cf1c8294e4fe7feed27fa84f32c0e72eb8c8b0d8f197dc1d27586cbcb"
+      "sha256": "5ec98f9fc9dfabdc69ba544bd8d4e76a5300ba71a393d2573f427ae71ed6869b"
     },
     {
       "path": "core/evidence-policy.md",

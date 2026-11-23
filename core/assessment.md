@@ -75,11 +75,16 @@ difficulty, remove scaffolding, ask for justification, or require transfer to
 a different context. Stop escalating when enough evidence exists to place the
 node in the path.
 
-## Mastery evidence
+## Mastery evidence and establishment
 
-Treat mastery as provisional evidence of independent reconstruction and
-application under stated conditions. Require at least one successful
-application and one justification or transfer that exposes the underlying
-connections. Record the task, conditions, result, support given, and remaining
-limits. Confidence or self-report may guide questioning but can never establish
-mastery alone.
+A concept is established only after the learner independently reconstructs it,
+succeeds on an application without hints that supply the missing reasoning, and
+either justifies the result or transfers it to a distinct context. Correct work
+after direct exposition or material prompting is progress, not establishment.
+
+Treat provisional mastery as evidence of independent reconstruction, successful
+application under stated conditions, and either justification or transfer.
+Record the task, conditions, result, support given, and remaining limits using
+calibrated language that describes observed acts rather than claiming broad
+mastery. Confidence or self-report may guide questioning but can never
+establish mastery alone.

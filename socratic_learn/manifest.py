@@ -32,6 +32,9 @@ SESSION_TITLE_HEADING_PATTERN = (
     f"{SESSION_TITLE_SUBJECT_FOCUS_RULE}"
 )
 
+SESSION_RECORD_VERSION = 2
+SESSION_RECORD_VERSION_MARKER = "<!-- socratic-learn-record-version: 2 -->"
+
 
 def session_record_contract_payload() -> dict[str, object]:
     """Launcher session-record contract accepted by the session parser."""
@@ -40,9 +43,23 @@ def session_record_contract_payload() -> dict[str, object]:
         "heading_pattern": SESSION_TITLE_HEADING_PATTERN,
         "title_rule": SESSION_TITLE_SUBJECT_FOCUS_RULE,
         "section_headings": list(SESSION_HEADINGS),
+        "record_version": SESSION_RECORD_VERSION,
+        "record_version_marker": SESSION_RECORD_VERSION_MARKER,
         "instruction": (
             "Write exactly one valid session record to checkpoint_path at close. "
-            "Use heading_pattern, title_rule, and section_headings in order."
+            "Use heading_pattern, title_rule, record_version_marker after the "
+            "heading, and section_headings in order. In version 2 records, use "
+            "evidence identifiers [E#] in concepts established and application "
+            "evidence with the same set of E numbers in both sections; use "
+            "progress identifiers [P#] only in application evidence; and use gap "
+            "identifiers [G#] in remaining gaps and next step, with next step "
+            "listing a nonempty subset of those G identifiers. Application bullets "
+            "must use exactly five pipe-separated fields in order: Task, "
+            "Conditions, Result, Support, and Limits. Use - None. in concepts "
+            "established and remaining gaps when empty, - None collected. when "
+            "application evidence is empty, and - None. in next step when no gaps "
+            "remain. Keep E/P/G identifiers in the private record only; never use "
+            "them in learner-facing conversation."
         ),
     }
 

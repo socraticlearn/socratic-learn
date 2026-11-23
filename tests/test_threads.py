@@ -14,7 +14,10 @@ from unittest import mock
 
 import socratic_learn.thread_storage as thread_storage_module
 from socratic_learn.errors import IntegrityError
-from socratic_learn.manifest import SESSION_HEADINGS
+from socratic_learn.manifest import (
+    SESSION_HEADINGS,
+    SESSION_RECORD_VERSION_MARKER,
+)
 from socratic_learn.thread_schema import parse_utc_timestamp
 from socratic_learn.threads import (
     THREAD_SCHEMA_VERSION,
@@ -49,6 +52,77 @@ def _valid_session_body(*, title: str, next_step: str, session_date: str | None 
         "## Sources": "No external sources were used.",
     }
     lines = [f"# Session: {today} - {title}", ""]
+    for heading in SESSION_HEADINGS:
+        lines.extend([heading, sections[heading], ""])
+    return "\n".join(lines)
+
+
+def _pending_checkpoint_body(
+    *,
+    title: str,
+    next_step: str | None = None,
+    session_date: str | None = None,
+) -> str:
+    """Version-2 body for pending checkpoints that finalize under current rules."""
+
+    if next_step is None:
+        return _valid_v2_session_body(title=title, session_date=session_date)
+    if next_step.startswith("- ["):
+        return _valid_v2_session_body(
+            title=title,
+            next_step=next_step,
+            session_date=session_date,
+        )
+    return _valid_v2_session_body(
+        title=title,
+        next_step=f"- [G1] {next_step}",
+        session_date=session_date,
+    )
+
+
+def _valid_v2_session_body(
+    *,
+    title: str,
+    next_step: str | None = None,
+    session_date: str | None = None,
+) -> str:
+    today = session_date or datetime.now(UTC).strftime("%Y-%m-%d")
+    sections = {
+        "## Outcome": "Explain one observable result.",
+        "## Diagnostic evidence": "Recorded a misconception and revision.",
+        "## Learning route": "1. Prerequisite -> target skill.",
+        "## Concepts established": "- [E1] Named the corrected concept with support.",
+        "## Application evidence": (
+            "- [E1] Task: Apply the concept | Conditions: One problem | "
+            "Result: Correct answer | Support: Tutor hint | Limits: Single topic"
+        ),
+        "## Remaining gaps": "- [G1] One gap remains explicitly recorded.",
+        "## Next step": next_step or "- [G1] Continue with the gap.",
+        "## Sources": "No external sources were used.",
+    }
+    lines = [f"# Session: {today} - {title}", SESSION_RECORD_VERSION_MARKER, ""]
+    for heading in SESSION_HEADINGS:
+        lines.extend([heading, sections[heading], ""])
+    return "\n".join(lines)
+
+
+def _valid_v2_all_sentinel_session_body(
+    *,
+    title: str,
+    session_date: str | None = None,
+) -> str:
+    today = session_date or datetime.now(UTC).strftime("%Y-%m-%d")
+    sections = {
+        "## Outcome": "Explain one observable result.",
+        "## Diagnostic evidence": "Recorded a misconception and revision.",
+        "## Learning route": "1. Prerequisite -> target skill.",
+        "## Concepts established": "- None.",
+        "## Application evidence": "- None collected.",
+        "## Remaining gaps": "- None.",
+        "## Next step": "- None.",
+        "## Sources": "No external sources were used.",
+    }
+    lines = [f"# Session: {today} - {title}", SESSION_RECORD_VERSION_MARKER, ""]
     for heading in SESSION_HEADINGS:
         lines.extend([heading, sections[heading], ""])
     return "\n".join(lines)
@@ -178,7 +252,7 @@ class ThreadStorageTests(unittest.TestCase):
         thread = create_thread(self.records, goal="platonic forms")
         pending = create_pending_encounter(self.records, thread.id)
         pending.write_text(
-            _valid_session_body(
+            _pending_checkpoint_body(
                 title="Philosophy: Plato's cave allegory",
                 next_step="Predict how the cave metaphor changes with a second source.",
             ),
@@ -200,7 +274,7 @@ class ThreadStorageTests(unittest.TestCase):
         thread = create_thread(self.records, goal="once")
         pending = create_pending_encounter(self.records, thread.id)
         pending.write_text(
-            _valid_session_body(
+            _pending_checkpoint_body(
                 title="Math: One attempt",
                 next_step="Retry later.",
             ),
@@ -222,11 +296,11 @@ class ThreadStorageTests(unittest.TestCase):
         pending_a = create_pending_encounter(self.records, thread.id)
         pending_b = create_pending_encounter(self.records, thread.id)
         pending_a.write_text(
-            _valid_session_body(title="Physics: Motion", next_step="Continue A."),
+            _pending_checkpoint_body(title="Physics: Motion", next_step="Continue A."),
             encoding="utf-8",
         )
         pending_b.write_text(
-            _valid_session_body(title="Physics: Energy", next_step="Continue B."),
+            _pending_checkpoint_body(title="Physics: Energy", next_step="Continue B."),
             encoding="utf-8",
         )
         first = finalize_thread_encounter(self.records, thread.id, pending_a)
@@ -243,7 +317,7 @@ class ThreadStorageTests(unittest.TestCase):
 
     def test_finalize_identical_content_creates_distinct_final_encounters(self) -> None:
         thread = create_thread(self.records, goal="duplicate bodies")
-        body = _valid_session_body(title="Chemistry: Bonds", next_step="Continue.")
+        body = _pending_checkpoint_body(title="Chemistry: Bonds", next_step="Continue.")
         first_pending = create_pending_encounter(self.records, thread.id)
         second_pending = create_pending_encounter(self.records, thread.id)
         first_pending.write_text(body, encoding="utf-8")
@@ -485,7 +559,7 @@ class ThreadStorageTests(unittest.TestCase):
         thread = create_thread(self.records, goal="rollback")
         pending = create_pending_encounter(self.records, thread.id)
         pending.write_text(
-            _valid_session_body(title="Science: Rollback", next_step="Retry."),
+            _pending_checkpoint_body(title="Science: Rollback", next_step="Retry."),
             encoding="utf-8",
         )
         with mock.patch(
@@ -645,7 +719,7 @@ class ThreadStorageTests(unittest.TestCase):
         thread = create_thread(self.records, goal="recover after hard kill")
         pending = create_pending_encounter(self.records, thread.id)
         pending.write_text(
-            _valid_session_body(
+            _pending_checkpoint_body(
                 title="Logic: Recovered checkpoint",
                 next_step="Resume from recovered evidence.",
             ),
@@ -687,7 +761,7 @@ class ThreadStorageTests(unittest.TestCase):
             thread.id,
         )
         valid.write_text(
-            _valid_session_body(
+            _pending_checkpoint_body(
                 title="Logic: Active checkpoint",
                 next_step="Wait for the active launcher.",
             ),
@@ -769,7 +843,7 @@ class ThreadStorageTests(unittest.TestCase):
         thread = create_thread(self.records, goal="concurrent recovery")
         pending = create_pending_encounter(self.records, thread.id)
         pending.write_text(
-            _valid_session_body(
+            _pending_checkpoint_body(
                 title="Logic: Recovered elsewhere",
                 next_step="Continue safely.",
             ),
@@ -894,6 +968,273 @@ class ThreadStorageTests(unittest.TestCase):
         link.symlink_to(outside)
         with self.assertRaises(IntegrityError):
             finalize_thread_encounter(self.records, thread.id, link)
+
+
+class VersionedSessionRecordTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.records = Path(self.temporary.name).resolve(strict=True) / "records"
+        self.records.mkdir()
+        (self.records / "sessions").mkdir()
+
+    def test_valid_v2_parses_and_finalizes(self) -> None:
+        body = _valid_v2_session_body(
+            title="Logic: Versioned memory",
+            next_step="- [G1] Revisit the recorded gap.",
+        )
+        parsed = parse_session_record(body)
+        self.assertEqual("Logic: Versioned memory", parsed.refined_title)
+        self.assertEqual("- [G1] Revisit the recorded gap.", parsed.next_step)
+
+        thread = create_thread(self.records, goal="versioned memory")
+        pending = create_pending_encounter(self.records, thread.id)
+        pending.write_text(body, encoding="utf-8")
+        finalized = finalize_thread_encounter(self.records, thread.id, pending)
+        self.assertEqual("Logic: Versioned memory", finalized.refined_title)
+
+    def test_legacy_session_body_still_parses(self) -> None:
+        parse_session_record(
+            _valid_session_body(
+                title="Logic: Legacy record",
+                next_step="Continue tomorrow.",
+            )
+        )
+
+    def test_valid_v2_all_sentinel_sections_parse(self) -> None:
+        body = _valid_v2_all_sentinel_session_body(title="Logic: Empty structured sections")
+        parsed = parse_session_record(body)
+        self.assertEqual("Logic: Empty structured sections", parsed.refined_title)
+        self.assertEqual("- None.", parsed.next_step)
+
+    def test_v2_rejects_established_e_without_application_e(self) -> None:
+        body = _valid_v2_session_body(
+            title="Logic: Missing application",
+            next_step="- [G1] Continue.",
+        ).replace(
+            "## Concepts established\n- [E1] Named the corrected concept with support.",
+            "## Concepts established\n- [E1] First concept.\n- [E2] Second concept.",
+        )
+        with self.assertRaises(IntegrityError):
+            parse_session_record(body)
+
+    def test_v2_rejects_application_e_without_established_e(self) -> None:
+        body = _valid_v2_session_body(
+            title="Logic: Missing concept",
+            next_step="- [G1] Continue.",
+        ).replace(
+            "- [E1] Task: Apply the concept",
+            "- [E2] Task: Apply the concept",
+        )
+        with self.assertRaises(IntegrityError):
+            parse_session_record(body)
+
+    def test_v2_rejects_duplicate_e_p_and_g_identifiers(self) -> None:
+        cases = [
+            "## Concepts established\n- [E1] First.\n- [E1] Duplicate.",
+            "## Application evidence\n"
+            "- [E1] Task: A | Conditions: B | Result: C | Support: D | Limits: E\n"
+            "- [E1] Task: F | Conditions: G | Result: H | Support: I | Limits: J",
+            "## Application evidence\n"
+            "- [E1] Task: A | Conditions: B | Result: C | Support: D | Limits: E\n"
+            "- [P1] Task: A | Conditions: B | Result: C | Support: D | Limits: E\n"
+            "- [P1] Task: F | Conditions: G | Result: H | Support: I | Limits: J",
+            "## Remaining gaps\n- [G1] First gap.\n- [G1] Duplicate gap.",
+        ]
+        for replacement in cases:
+            heading, _, content = replacement.partition("\n")
+            body = _valid_v2_session_body(
+                title="Logic: Duplicate ids",
+                next_step="- [G1] Continue.",
+            )
+            old = {
+                "## Concepts established": "## Concepts established\n"
+                "- [E1] Named the corrected concept with support.",
+                "## Application evidence": "## Application evidence\n"
+                "- [E1] Task: Apply the concept | Conditions: One problem | "
+                "Result: Correct answer | Support: Tutor hint | Limits: Single topic",
+                "## Remaining gaps": "## Remaining gaps\n"
+                "- [G1] One gap remains explicitly recorded.",
+            }[heading]
+            with self.assertRaises(IntegrityError, msg=replacement):
+                parse_session_record(body.replace(old, f"{heading}\n{content}"))
+
+    def test_v2_rejects_p_outside_application_evidence(self) -> None:
+        body = _valid_v2_session_body(
+            title="Logic: Progress outside application",
+            next_step="- [G1] Continue.",
+        ).replace(
+            "## Concepts established\n- [E1] Named the corrected concept with support.",
+            "## Concepts established\n- [P1] Wrong placement.",
+        )
+        with self.assertRaisesRegex(
+            IntegrityError,
+            "progress identifiers are only allowed in application evidence",
+        ):
+            parse_session_record(body)
+
+    def test_v2_rejects_malformed_or_empty_application_fields(self) -> None:
+        malformed = [
+            "- [E1] Conditions: One | Task: Apply | Result: R | Support: S | Limits: L",
+            "- [E1] Task:  | Conditions: One | Result: R | Support: S | Limits: L",
+            "- [E1] Task: Apply | Conditions: One | Result: R | Support: S",
+        ]
+        for application in malformed:
+            body = _valid_v2_session_body(
+                title="Logic: Malformed application",
+                next_step="- [G1] Continue.",
+            ).replace(
+                "- [E1] Task: Apply the concept | Conditions: One problem | "
+                "Result: Correct answer | Support: Tutor hint | Limits: Single topic",
+                application,
+            )
+            with self.assertRaises(IntegrityError, msg=application):
+                parse_session_record(body)
+
+    def test_v2_rejects_stale_next_step_g_and_next_step_without_g(self) -> None:
+        stale = _valid_v2_session_body(
+            title="Logic: Stale next step",
+            next_step="- [G2] Not in remaining gaps.",
+        )
+        with self.assertRaises(IntegrityError):
+            parse_session_record(stale)
+
+        without_gap = _valid_v2_session_body(
+            title="Logic: Freeform next step",
+            next_step="Continue without a gap identifier.",
+        )
+        with self.assertRaises(IntegrityError):
+            parse_session_record(without_gap)
+
+    def test_v2_rejects_sentinel_mixed_with_structured_bullets(self) -> None:
+        replacements = {
+            "## Concepts established": (
+                "## Concepts established\n- None.\n"
+                "- [E1] Concept after sentinel."
+            ),
+            "## Application evidence": (
+                "## Application evidence\n- None collected.\n"
+                "- [E1] Task: A | Conditions: B | Result: C | Support: D | Limits: E"
+            ),
+            "## Remaining gaps": (
+                "## Remaining gaps\n- None.\n- [G1] Gap after sentinel."
+            ),
+            "## Next step": "## Next step\n- None.\n- [G1] Step after sentinel.",
+        }
+        for heading, replacement in replacements.items():
+            body = _valid_v2_session_body(
+                title="Logic: Mixed sentinel",
+                next_step="- [G1] Continue.",
+            )
+            old = {
+                "## Concepts established": "## Concepts established\n"
+                "- [E1] Named the corrected concept with support.",
+                "## Application evidence": "## Application evidence\n"
+                "- [E1] Task: Apply the concept | Conditions: One problem | "
+                "Result: Correct answer | Support: Tutor hint | Limits: Single topic",
+                "## Remaining gaps": "## Remaining gaps\n"
+                "- [G1] One gap remains explicitly recorded.",
+                "## Next step": "## Next step\n- [G1] Continue.",
+            }[heading]
+            with self.assertRaises(IntegrityError, msg=heading):
+                parse_session_record(body.replace(old, replacement))
+
+    def test_v2_rejects_mixed_or_mismatched_sentinels(self) -> None:
+        cases = [
+            _valid_v2_session_body(
+                title="Logic: Mixed concept sentinel",
+                next_step="- [G1] Continue.",
+            ).replace(
+                "- [E1] Named the corrected concept with support.",
+                "- None.",
+            ),
+            _valid_v2_session_body(
+                title="Logic: Mixed application sentinel",
+                next_step="- [G1] Continue.",
+            ).replace(
+                "## Application evidence\n"
+                "- [E1] Task: Apply the concept | Conditions: One problem | "
+                "Result: Correct answer | Support: Tutor hint | Limits: Single topic",
+                "## Application evidence\n- None collected.",
+            ),
+            _valid_v2_session_body(
+                title="Logic: Wrong gap sentinel",
+                next_step="- [G1] Continue.",
+            ).replace(
+                "## Remaining gaps\n- [G1] One gap remains explicitly recorded.",
+                "## Remaining gaps\n- None collected.",
+            ),
+        ]
+        for body in cases:
+            with self.assertRaises(IntegrityError):
+                parse_session_record(body)
+
+    def test_v2_rejects_invalid_record_version_comments(self) -> None:
+        malformed = _valid_v2_session_body(
+            title="Logic: Malformed marker",
+            next_step="- [G1] Continue.",
+        ).replace(
+            SESSION_RECORD_VERSION_MARKER,
+            "<!-- socratic-learn-record-version:2 -->",
+        )
+        with self.assertRaises(IntegrityError):
+            parse_session_record(malformed)
+
+        unknown_in_body = _valid_v2_session_body(
+            title="Logic: Body version comment",
+            next_step="- [G1] Continue.",
+        ).replace(
+            "## Sources\nNo external sources were used.",
+            "## Sources\n<!-- socratic-learn-record-version: 3 -->\n"
+            "No external sources were used.",
+        )
+        with self.assertRaises(IntegrityError):
+            parse_session_record(unknown_in_body)
+
+        extra_comment = _valid_v2_session_body(
+            title="Logic: Extra version comment",
+            next_step="- [G1] Continue.",
+        ).replace(
+            "## Sources\nNo external sources were used.",
+            "## Sources\n<!-- socratic-learn-record-version: 1 -->\n"
+            "No external sources were used.",
+        )
+        with self.assertRaises(IntegrityError):
+            parse_session_record(extra_comment)
+
+        duplicate = _valid_v2_session_body(
+            title="Logic: Duplicate marker",
+            next_step="- [G1] Continue.",
+        ).replace(
+            SESSION_RECORD_VERSION_MARKER,
+            f"{SESSION_RECORD_VERSION_MARKER}\n{SESSION_RECORD_VERSION_MARKER}",
+        )
+        with self.assertRaises(IntegrityError):
+            parse_session_record(duplicate)
+
+    def test_finalize_rejects_unmarked_pending_checkpoint(self) -> None:
+        body = _valid_session_body(
+            title="Logic: Unmarked pending",
+            next_step="Continue tomorrow.",
+        )
+        parse_session_record(body)
+
+        thread = create_thread(self.records, goal="unmarked pending")
+        pending = create_pending_encounter(self.records, thread.id)
+        pending.write_text(body, encoding="utf-8")
+        with self.assertRaisesRegex(
+            IntegrityError,
+            "session record version marker is required for new checkpoints",
+        ):
+            finalize_thread_encounter(self.records, thread.id, pending)
+
+    def test_v2_rejects_non_ascii_identifier_digits(self) -> None:
+        body = _valid_v2_session_body(
+            title="Logic: Unicode digit",
+            next_step="- [G1] Continue.",
+        ).replace("[E1]", "[E1٠]", 1)
+        with self.assertRaises(IntegrityError):
+            parse_session_record(body)
 
 
 class WorkspaceThreadRootTests(unittest.TestCase):

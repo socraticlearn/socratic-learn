@@ -1,4 +1,5 @@
 # Session: YYYY-MM-DD - Subject: Specific focus
+<!-- socratic-learn-record-version: 2 -->
 <!-- After the learner confirms the outcome, replace Subject and Specific focus
      with a concise <Subject>: <Specific focus> title. -->
 <!-- When the launcher supplies a checkpoint path, write exactly one valid record
@@ -14,16 +15,17 @@
 <!-- List ordered route steps and explain why each supports the next. -->
 
 ## Concepts established
-<!-- Record concepts supported by evidence during this session. -->
+<!-- Record evidence identifiers such as - [E1] concept with support, or - None. -->
 
 ## Application evidence
-<!-- Record the learner's observable application actions and results. -->
+<!-- Record - [E1] Task: ... | Conditions: ... | Result: ... | Support: ... | Limits: ...
+     and/or - [P1] with the same five fields, or - None collected. -->
 
 ## Remaining gaps
-<!-- Record unresolved misconceptions, missing evidence, and uncertainty. -->
+<!-- Record gap identifiers such as - [G1] unresolved item, or - None. -->
 
 ## Next step
-<!-- Record one learner-approved action that follows from the evidence. -->
+<!-- Record one or more - [G#] actions drawn from remaining gaps, or - None. -->
 
 ## Sources
 <!-- Record sources used and identify any claims that remain unverified. -->

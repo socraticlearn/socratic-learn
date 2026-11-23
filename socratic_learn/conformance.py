@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 
 
-CONFORMANCE_CONTRACT_VERSION = 5
+CONFORMANCE_CONTRACT_VERSION = 6
 
 
 @dataclass(frozen=True)
@@ -95,9 +95,31 @@ _CONTRACTS = (
             ("diagnostic evidence",),
             ("application evidence",),
             ("remaining gaps",),
+            ("observed learner acts",),
+            ("rather than claiming broad mastery", "claiming broad mastery"),
         ),
         "session closure does not require evidence and remaining gaps",
         "require diagnostic evidence, application evidence, and remaining gaps at closure",
+    ),
+    _Contract(
+        "factual-precision",
+        "core/pedagogy.md",
+        (
+            ("factual precision",),
+            ("literal mechanism",),
+            ("approximation",),
+            ("analogy",),
+            ("narrow", "verify"),
+            ("learner challenge", "re-evaluat"),
+            (
+                "must not be stated as the real mechanism",
+                "not be stated as the real mechanism",
+            ),
+            ("analogy boundary", "boundary before"),
+        ),
+        "factual explanations lack precision gates, mechanism distinctions, or challenge handling",
+        "gate factual claims, distinguish mechanism from analogy, narrow or verify uncertainty, "
+        "and re-evaluate after learner challenges",
     ),
     _Contract(
         "exposition-fallback",
@@ -301,6 +323,23 @@ _CONTRACTS = (
         "externally unverified claims, and relevant source locations",
     ),
     _Contract(
+        "independent-establishment",
+        "core/assessment.md",
+        (
+            ("independently reconstruct",),
+            ("succeeds on an application", "successful application"),
+            ("without hints that supply", "hints that supply the missing reasoning"),
+            ("justifies the result", "justification"),
+            ("transfers it", "transfer"),
+            ("progress, not establishment", "not establishment"),
+            ("direct exposition", "material prompting"),
+            ("concept is established", "established only after"),
+        ),
+        "mastery establishment does not require independent reconstruction, application, and justification or transfer",
+        "establish concepts only after independent reconstruction, a successful application without "
+        "hints that supply the reasoning, and either justification or transfer; treat prompted work as progress",
+    ),
+    _Contract(
         "focused-learner-task",
         "core/pedagogy.md",
         (
@@ -480,6 +519,32 @@ _CONTRACTS = (
         "preferences and experience signals are not separated from demonstrated knowledge",
         "store confirmed preferences separately and never cite representation, confidence, "
         "or enjoyment as mastery evidence",
+    ),
+    _Contract(
+        "record-reconciliation",
+        "core/session-protocol.md",
+        (
+            ("before writing the session record", "reconcile"),
+            ("established concepts", "concepts established"),
+            (
+                "application evidence",
+                "recorded applications",
+                "successful applications",
+            ),
+            ("remaining gaps",),
+            ("next step",),
+            ("source or uncertainty", "uncertainty notes"),
+            ("resolved gaps",),
+            ("removed or rewritten",),
+            (
+                "may not target work already established",
+                "not target work already established",
+            ),
+            ("preserve honest partial",),
+        ),
+        "session records are written without reconciling evidence, gaps, and next steps",
+        "reconcile established concepts, application evidence, gaps, next steps, and "
+        "uncertainty before saving; remove resolved gaps and avoid next steps on established work",
     ),
     _Contract(
         "resumable-retrieval",

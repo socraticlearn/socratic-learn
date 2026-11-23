@@ -18,6 +18,7 @@ from socratic_learn.hosts import command_for
 from socratic_learn.launcher import LaunchOptions, run_learning
 from socratic_learn.manifest import (
     SESSION_HEADINGS,
+    SESSION_RECORD_VERSION_MARKER,
     SESSION_TITLE_HEADING_PATTERN,
     SESSION_TITLE_SUBJECT_FOCUS_RULE,
     session_record_contract_payload,
@@ -47,6 +48,36 @@ def _valid_session_body(*, title: str, next_step: str) -> str:
         "## Sources": "No external sources were used.",
     }
     lines = [f"# Session: {datetime.now(UTC):%Y-%m-%d} - {title}", ""]
+    for heading in SESSION_HEADINGS:
+        lines.extend([heading, sections[heading], ""])
+    return "\n".join(lines)
+
+
+def _pending_checkpoint_body(*, title: str, next_step: str) -> str:
+    if next_step.startswith("- ["):
+        return _valid_v2_session_body(title=title, next_step=next_step)
+    return _valid_v2_session_body(title=title, next_step=f"- [G1] {next_step}")
+
+
+def _valid_v2_session_body(*, title: str, next_step: str) -> str:
+    sections = {
+        "## Outcome": "Completed one observable result.",
+        "## Diagnostic evidence": "Recorded one learner attempt.",
+        "## Learning route": "1. Foundation -> application.",
+        "## Concepts established": "- [E1] One concept was established.",
+        "## Application evidence": (
+            "- [E1] Task: Changed case | Conditions: Novel prompt | "
+            "Result: Correct answer | Support: Worked example | Limits: One topic"
+        ),
+        "## Remaining gaps": "- [G1] One gap remains.",
+        "## Next step": next_step,
+        "## Sources": "No external sources were used.",
+    }
+    lines = [
+        f"# Session: {datetime.now(UTC):%Y-%m-%d} - {title}",
+        SESSION_RECORD_VERSION_MARKER,
+        "",
+    ]
     for heading in SESSION_HEADINGS:
         lines.extend([heading, sections[heading], ""])
     return "\n".join(lines)
@@ -144,7 +175,7 @@ class LauncherTests(unittest.TestCase):
                 records = checkpoint.parents[3]
                 thread_id = checkpoint.parents[1].name
                 checkpoint.write_text(
-                    _valid_session_body(
+                    _pending_checkpoint_body(
                         title="Logic: Concurrent checkpoint",
                         next_step="Finish in the owning launcher.",
                     ),
@@ -552,7 +583,7 @@ class LauncherTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             def interrupt(argv: list[str], **kwargs: object) -> CompletedProcess[str]:
                 _checkpoint_from_argv(argv).write_text(
-                    _valid_session_body(
+                    _pending_checkpoint_body(
                         title="Logic: Interrupted but saved",
                         next_step="Resume from the saved checkpoint.",
                     ),
@@ -805,7 +836,7 @@ class LauncherTests(unittest.TestCase):
             thread = create_thread(workspace.records, goal="original goal")
             previous_pending = create_pending_encounter(workspace.records, thread.id)
             previous_pending.write_text(
-                _valid_session_body(
+                _pending_checkpoint_body(
                     title="Logic: Prior title",
                     next_step="Test a counterexample.",
                 ),
@@ -834,7 +865,7 @@ class LauncherTests(unittest.TestCase):
             def run(argv, **_kwargs):
                 payloads.append(argv[-1])
                 _checkpoint_from_argv(argv).write_text(
-                    _valid_session_body(
+                    _pending_checkpoint_body(
                         title="Logic: Refined title",
                         next_step="Apply the refined rule.",
                     ),
@@ -860,7 +891,7 @@ class LauncherTests(unittest.TestCase):
                 control["resume"]["prior_complete_encounter_path"],
             )
             self.assertEqual(
-                "Test a counterexample.",
+                "- [G1] Test a counterexample.",
                 control["resume"]["saved_next_step"],
             )
             updated = load_thread(workspace.records, thread.id)
@@ -896,7 +927,7 @@ class LauncherTests(unittest.TestCase):
             thread = create_thread(workspace.records, goal="probability")
             previous_pending = create_pending_encounter(workspace.records, thread.id)
             previous_pending.write_text(
-                _valid_session_body(
+                _pending_checkpoint_body(
                     title="Probability: Prior",
                     next_step="Recheck calibration.",
                 ),
@@ -1035,7 +1066,7 @@ class LauncherTests(unittest.TestCase):
 
             def valid(argv, **_kwargs):
                 _checkpoint_from_argv(argv).write_text(
-                    _valid_session_body(
+                    _pending_checkpoint_body(
                         title="Logic: Valid",
                         next_step="Continue.",
                     ),
@@ -1189,14 +1220,13 @@ class LauncherTests(unittest.TestCase):
     def test_control_characters_are_sanitized_only_in_menu_labels(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             goal = "line one\nline two\tkept\u202ereversed\u2066isolated"
-            next_step = "next\nline\u202ereversed\u2066isolated"
             workspace = prepare_personal_workspace(Path(temporary))
             thread = create_thread(workspace.records, goal=goal)
             pending = create_pending_encounter(workspace.records, thread.id)
             pending.write_text(
-                _valid_session_body(
+                _pending_checkpoint_body(
                     title="Logic: Safe\u202etitle",
-                    next_step=next_step,
+                    next_step="- [G1] Continue with sanitized menu labels.",
                 ),
                 encoding="utf-8",
             )
@@ -1247,7 +1277,10 @@ class LauncherTests(unittest.TestCase):
             ]
             self.assertIn(goal, stored_goals)
             stored = load_thread(workspace.records, thread.id)
-            self.assertEqual(next_step, stored.next_step)
+            self.assertEqual(
+                "- [G1] Continue with sanitized menu labels.",
+                stored.next_step,
+            )
 
     def test_personal_and_here_launches_use_isolated_choosers(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1302,12 +1335,24 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(SESSION_TITLE_HEADING_PATTERN, contract["heading_pattern"])
             self.assertEqual(SESSION_TITLE_SUBJECT_FOCUS_RULE, contract["title_rule"])
             self.assertEqual(list(SESSION_HEADINGS), contract["section_headings"])
+            self.assertEqual(2, contract["record_version"])
+            self.assertEqual(SESSION_RECORD_VERSION_MARKER, contract["record_version_marker"])
+            instruction = contract["instruction"]
+            for phrase in (
+                "same set of E numbers",
+                "nonempty subset",
+                "Task, Conditions, Result, Support, and Limits",
+                "- None. in next step when no gaps",
+                "private record",
+                "learner-facing",
+            ):
+                self.assertIn(phrase, instruction)
 
-    def test_valid_checkpoint_written_with_contract_heading_passes_parser(self) -> None:
+    def test_unmarked_checkpoint_remains_incomplete_after_launch(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             captured: list[list[str]] = []
 
-            def write_valid(argv, **_kwargs):
+            def write_unmarked(argv, **_kwargs):
                 pending = _checkpoint_from_argv(argv)
                 captured.append(argv)
                 pending.write_text(
@@ -1319,18 +1364,59 @@ class LauncherTests(unittest.TestCase):
                 )
                 return CompletedProcess(argv, 0)
 
+            output = io.StringIO()
             run_learning(
                 LaunchOptions("logic", "pi", False, Path.cwd()),
-                output=io.StringIO(),
+                output=output,
                 which={"pi": "pi"}.get,
-                run_process=write_valid,
+                run_process=write_unmarked,
                 environ={"SOCRATIC_LEARN_HOME": temporary},
             )
             pending = _checkpoint_from_argv(captured[0])
             self.assertFalse(pending.exists())
+            records = pending.parents[3]
+            thread_id = pending.parents[1].name
+            thread = load_thread(records, thread_id)
+            self.assertEqual("incomplete", thread.status)
+            self.assertIn("malformed checkpoint", output.getvalue())
             parse_session_record(
                 _valid_session_body(
                     title="Logic: Contract title",
                     next_step="Apply once more.",
                 )
             )
+
+    def test_v2_checkpoint_written_with_contract_passes_parser(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            captured: list[tuple[list[str], Path]] = []
+
+            def write_valid_v2(argv, **_kwargs):
+                pending = _checkpoint_from_argv(argv)
+                captured.append((argv, pending))
+                pending.write_text(
+                    _valid_v2_session_body(
+                        title="Logic: Versioned checkpoint",
+                        next_step="- [G1] Apply once more.",
+                    ),
+                    encoding="utf-8",
+                )
+                return CompletedProcess(argv, 0)
+
+            run_learning(
+                LaunchOptions("logic", "pi", False, Path.cwd()),
+                output=io.StringIO(),
+                which={"pi": "pi"}.get,
+                run_process=write_valid_v2,
+                environ={"SOCRATIC_LEARN_HOME": temporary},
+            )
+            _argv, pending = captured[0]
+            self.assertFalse(pending.exists())
+            records = pending.parents[3]
+            thread_id = pending.parents[1].name
+            thread = load_thread(records, thread_id)
+            self.assertEqual("complete", thread.status)
+            final_path = (
+                threads_root(records) / thread_id / "sessions" / thread.latest_encounter
+            )
+            parsed = parse_session_record(final_path.read_text(encoding="utf-8"))
+            self.assertEqual("Logic: Versioned checkpoint", parsed.refined_title)

@@ -326,7 +326,10 @@ def _finish_encounter(
         try:
             if pending.is_symlink():
                 raise IntegrityError("pending checkpoint is a symbolic link")
-            parse_session_record(pending.read_text(encoding="utf-8"))
+            parse_session_record(
+                pending.read_text(encoding="utf-8"),
+                require_current_record=True,
+            )
         except (IntegrityError, OSError, UnicodeError):
             _write_warning(
                 output,

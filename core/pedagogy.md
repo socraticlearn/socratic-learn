@@ -28,6 +28,15 @@ mathematics, follow the classification and hypothesis rules in the evidence
 policy. Use an analogy only as an intuition aid; identify where it stops being
 valid and return to the precise model.
 
+## Factual precision
+
+Run a factual precision gate before stating how something works. Distinguish
+literal mechanism, approximation, and analogy. An analogy may aid intuition but
+must not be stated as the real mechanism. State the analogy boundary before
+using it for learner application. When a central stable claim cannot be stated
+confidently, narrow the claim or verify it. Learner challenges trigger
+re-evaluation rather than automatic defense.
+
 ## Vocabulary readiness and concept ramp
 
 Treat vocabulary readiness as a learner-facing safety condition. A term,

@@ -12,6 +12,7 @@ from socratic_learn.conformance import (
 from socratic_learn.errors import IntegrityError
 from socratic_learn.manifest import (
     SESSION_TITLE_HEADING_PATTERN,
+    SESSION_TITLE_SUBJECT_FOCUS_RULE,
     serialize_json,
     session_record_contract_payload,
     sha256_bytes,
@@ -65,14 +66,36 @@ def valid_manifest() -> dict[str, object]:
 
 
 class ManifestTests(unittest.TestCase):
+    def test_learning_integrity_release_uses_protocol_1_4(self) -> None:
+        self.assertEqual("1.4.0", PROTOCOL_VERSION)
+
     def test_public_contract_versions_are_exact(self) -> None:
-        self.assertEqual("1.3.0", PROTOCOL_VERSION)
-        self.assertEqual(5, CONFORMANCE_CONTRACT_VERSION)
+        self.assertEqual("1.4.0", PROTOCOL_VERSION)
+        self.assertEqual(6, CONFORMANCE_CONTRACT_VERSION)
 
     def test_session_record_contract_matches_parser_expectations(self) -> None:
         contract = session_record_contract_payload()
         self.assertEqual(SESSION_TITLE_HEADING_PATTERN, contract["heading_pattern"])
+        self.assertEqual(SESSION_TITLE_SUBJECT_FOCUS_RULE, contract["title_rule"])
         self.assertEqual(list(SESSION_HEADINGS), contract["section_headings"])
+        self.assertEqual(2, contract["record_version"])
+        self.assertEqual(
+            "<!-- socratic-learn-record-version: 2 -->",
+            contract["record_version_marker"],
+        )
+        instruction = contract["instruction"]
+        self.assertIsInstance(instruction, str)
+        for phrase in (
+            "same set of E numbers",
+            "progress identifiers",
+            "nonempty subset",
+            "Task, Conditions, Result, Support, and Limits",
+            "- None. in next step when no gaps",
+            "- None collected.",
+            "private record",
+            "learner-facing",
+        ):
+            self.assertIn(phrase, instruction)
 
     def test_serialize_json_is_sorted_utf8_with_one_final_newline(self) -> None:
         result = serialize_json({"z": "café", "a": 1})

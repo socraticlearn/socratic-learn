@@ -68,6 +68,15 @@ exposition, return control through an active application or an active question.
 Ask one focused learner task at a time. Do not multiply several claims by
 several analysis dimensions in one prompt. Decompose a claim-by-dimension matrix
 and choose the smallest useful next task from the learner's answer.
+
+## Factual precision
+
+Run a factual precision gate before stating how something works. Distinguish
+literal mechanism, approximation, and analogy. An analogy may aid intuition but
+must not be stated as the real mechanism. State the analogy boundary before
+using it for learner application. When a central stable claim cannot be stated
+confidently, narrow the claim or verify it. Learner challenges trigger
+re-evaluation rather than automatic defense.
 """,
     "core/session-protocol.md": """# Session Protocol
 
@@ -124,6 +133,14 @@ If the learner states an available time budget, narrow the route scope without d
 
 ## 5. Close and persist
 
+Before writing the session record, reconcile established concepts, recorded
+applications, remaining gaps, the next step, and source or uncertainty notes.
+Resolved gaps must be removed or rewritten. The next step may not target work
+already established. Preserve honest partial outcomes.
+
+Describe closure in terms of observed learner acts, recorded applications, and
+remaining limits rather than claiming broad mastery of the whole objective.
+
 When the launcher supplies a checkpoint path, write exactly one valid session record to that path at close using the required headings. Close with diagnostic evidence, application evidence, and remaining gaps. When studying a source, close with what the source asserts, what within-source support was inspected, what remains externally unverified, and relevant source locations.
 Store confirmed preferences separately from demonstrated knowledge. Never cite
 a preferred representation, confidence, or enjoyment as mastery evidence.
@@ -155,6 +172,18 @@ is sufficient to propose a path.
 A stated preference or learning-style label is context, not prerequisite or
 mastery evidence. Bracket knowledge only from observed task performance. After
 increasing support because of an error, ask one changed application or prediction.
+
+## Mastery evidence and establishment
+
+A concept is established only after the learner independently reconstructs it,
+succeeds on an application without hints that supply the missing reasoning, and
+either justifies the result or transfers it to a distinct context. Correct work
+after direct exposition or material prompting is progress, not establishment.
+Treat provisional mastery as evidence of independent reconstruction, successful
+application under stated conditions, and either justification or transfer.
+Record the task, conditions, result, support given, and remaining limits using
+calibrated language that describes observed acts rather than claiming broad
+mastery.
 """,
     "core/evidence-policy.md": """# Evidence Policy
 
@@ -998,6 +1027,79 @@ class ConformanceTests(unittest.TestCase):
                 "session-title-subject-focus",
                 "launcher-resume-evidence-boundary",
             }.issubset(REQUIRED_DIAGNOSTIC_CODES)
+        )
+
+    def test_required_diagnostic_codes_include_learning_integrity_gates(self) -> None:
+        self.assertTrue(
+            {
+                "factual-precision",
+                "independent-establishment",
+                "record-reconciliation",
+            }.issubset(REQUIRED_DIAGNOSTIC_CODES)
+        )
+
+    def test_requires_factual_precision(self) -> None:
+        self.assert_only_code(
+            minimal_bundle().replace(
+                "An analogy may aid intuition but\n"
+                "must not be stated as the real mechanism.",
+                "An analogy states how the mechanism really works.",
+            ),
+            "factual-precision",
+        )
+
+    def test_factual_precision_requires_literal_mechanism(self) -> None:
+        self.assert_only_code(
+            minimal_bundle().replace(
+                "Distinguish\nliteral mechanism, approximation, and analogy.",
+                "Distinguish\napproximation and analogy.",
+            ),
+            "factual-precision",
+        )
+
+    def test_factual_precision_requires_approximation(self) -> None:
+        self.assert_only_code(
+            minimal_bundle().replace(
+                "Distinguish\nliteral mechanism, approximation, and analogy.",
+                "Distinguish\nliteral mechanism and analogy.",
+            ),
+            "factual-precision",
+        )
+
+    def test_factual_precision_requires_analogy(self) -> None:
+        bundle = minimal_bundle().replace(
+            "literal mechanism, approximation, and analogy.",
+            "literal mechanism and approximation.",
+        )
+        bundle = bundle.replace(
+            "An analogy may aid intuition but\n"
+            "must not be stated as the real mechanism.",
+            "A comparison may aid intuition but\n"
+            "must not be stated as the real mechanism.",
+        )
+        bundle = bundle.replace(
+            "State the analogy boundary before",
+            "State the comparison boundary before",
+        )
+        self.assert_only_code(bundle, "factual-precision")
+
+    def test_requires_independent_establishment(self) -> None:
+        self.assert_only_code(
+            minimal_bundle().replace(
+                "succeeds on an application without hints that supply the missing reasoning, and\n"
+                "either justifies the result or transfers it to a distinct context.",
+                "succeeds on a restatement alone without application or transfer.",
+            ),
+            "independent-establishment",
+        )
+
+    def test_requires_record_reconciliation(self) -> None:
+        self.assert_only_code(
+            minimal_bundle().replace(
+                "Resolved gaps must be removed or rewritten.",
+                "Keep resolved gaps in the record for history.",
+            ),
+            "record-reconciliation",
         )
 
     def make_repository(self) -> tuple[TemporaryDirectory, Path]:

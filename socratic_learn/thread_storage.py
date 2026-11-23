@@ -605,7 +605,10 @@ def finalize_thread_encounter(
         _require_regular_file(pending, "pending encounter record")
         try:
             payload = pending.read_bytes()
-            parsed = parse_session_record(payload.decode("utf-8"))
+            parsed = parse_session_record(
+                payload.decode("utf-8"),
+                require_current_record=True,
+            )
         except UnicodeDecodeError as error:
             raise integrity("encounter record is not valid UTF-8", path=pending) from error
         except OSError as error:
@@ -625,7 +628,10 @@ def finalize_thread_encounter(
         final_path = located
         try:
             payload = final_path.read_bytes()
-            parsed = parse_session_record(payload.decode("utf-8"))
+            parsed = parse_session_record(
+                payload.decode("utf-8"),
+                require_current_record=True,
+            )
         except UnicodeDecodeError as error:
             raise integrity("encounter record is not valid UTF-8", path=final_path) from error
         except OSError as error:
@@ -750,7 +756,10 @@ def recover_pending_encounters(records: Path, thread_id: str) -> PendingRecovery
                 unsafe += 1
                 continue
             try:
-                parse_session_record(pending.read_text(encoding="utf-8"))
+                parse_session_record(
+                    pending.read_text(encoding="utf-8"),
+                    require_current_record=True,
+                )
             except (IntegrityError, OSError, UnicodeError):
                 discard_pending_encounter(records, thread_id, pending)
                 discarded += 1

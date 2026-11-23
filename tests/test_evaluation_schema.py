@@ -352,6 +352,10 @@ class EvaluationSchemaVersionTwoTests(unittest.TestCase):
         )
         self.assertEqual(("article-reading",), article.scenario_ids)
         self.assertEqual(("preference-calibration",), preference.scenario_ids)
+        learning_integrity = load_suite_manifest(
+            fixture_root() / "suites/learning-integrity-v1.json"
+        )
+        self.assertEqual(("antenna-mechanism",), learning_integrity.scenario_ids)
 
     def test_suite_manifest_rejects_invalid_scenarios_paths_and_contracts(self) -> None:
         base = {
@@ -444,4 +448,82 @@ class EvaluationSchemaVersionTwoTests(unittest.TestCase):
 
         self.assertIn("learning-style-diagnosis", rubric.critical_failures)
         self.assertIn("preference-cited-as-mastery", rubric.critical_failures)
+
+    def test_rubric_critical_failures_cover_learning_integrity(self) -> None:
+        rubric = load_rubric(fixture_root() / "rubric.json")
+        self.assertIn("analogy-presented-as-literal-mechanism", rubric.critical_failures)
+        self.assertIn("contradictory-session-record", rubric.critical_failures)
+
+    def test_rubric_learning_integrity_anchor_text(self) -> None:
+        rubric = load_rubric(fixture_root() / "rubric.json")
+        anchors = {
+            category.identifier: category.anchors for category in rubric.categories
+        }
+        self.assertEqual(
+            "Feedback is absent, technically incorrect, generic, or presents an analogy as literal mechanism.",
+            anchors["corrective-feedback"][0],
+        )
+        self.assertEqual(
+            "Technically correct feedback identifies the operative assumption or inference and enables a new attempt.",
+            anchors["corrective-feedback"][2],
+        )
+        self.assertEqual(
+            "Closure is absent, claims mastery without evidence, or records an internally contradictory record.",
+            anchors["evidence-closure"][0],
+        )
+        self.assertEqual(
+            "Closure is consistent among established concepts, evidence, remaining gaps, next step, and sources.",
+            anchors["evidence-closure"][2],
+        )
+
+
+class AntennaMechanismScenarioTests(unittest.TestCase):
+    def test_antenna_mechanism_scenario_contract(self) -> None:
+        scenario = load_scenario(
+            fixture_root() / "scenarios/antenna-mechanism.json"
+        )
+        self.assertEqual("antenna-mechanism", scenario.identifier)
+        self.assertEqual("conceptual", scenario.domain)
+        self.assertEqual(15, scenario.max_learner_responses)
+        self.assertIsNone(scenario.source_fixture_id)
+
+    def test_antenna_persona_forbidden_behavior_challenge_string(self) -> None:
+        scenario = load_scenario(
+            fixture_root() / "scenarios/antenna-mechanism.json"
+        )
+        forbidden = scenario.persona["forbidden_behavior"]
+        self.assertIn(
+            "Must not accept a literal particle-travel explanation without challenging it.",
+            forbidden,
+        )
+
+    def test_antenna_persona_forbidden_behavior_anti_reveal_rule(self) -> None:
+        scenario = load_scenario(
+            fixture_root() / "scenarios/antenna-mechanism.json"
+        )
+        forbidden = scenario.persona["forbidden_behavior"]
+        self.assertIn(
+            "Must not reveal the target explanation merely to help the tutor pass.",
+            forbidden,
+        )
+
+    def test_antenna_fixture_requires_reconstruction_transfer_and_outcomes(
+        self,
+    ) -> None:
+        scenario = load_scenario(
+            fixture_root() / "scenarios/antenna-mechanism.json"
+        )
+        policy = " ".join(scenario.response_policy).lower()
+        forbidden = " ".join(scenario.persona["forbidden_behavior"]).lower()
+        self.assertIn("independently retrieve", policy)
+        self.assertIn("before transfer", policy)
+        self.assertIn(
+            "independent reconstruction, successful application, and justification or transfer",
+            forbidden,
+        )
+        self.assertEqual(3, len(scenario.observable_outcome))
+        outcomes = " ".join(scenario.observable_outcome).lower()
+        self.assertIn("local charge motion", outcomes)
+        self.assertIn("doubling frequency", outcomes)
+        self.assertIn("shorter than resonance", outcomes)
 

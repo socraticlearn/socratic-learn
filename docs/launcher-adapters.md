@@ -77,9 +77,25 @@ The control object includes at least:
   `latest_launch_incomplete`, `must_reestablish_current_state`, and
   `saved_next_step` when resuming a stored thread.
 - `thread`: the learning goal, status, and display title for menu display.
-- `session_record_contract`: `heading_pattern`, `title_rule`, ordered
-  `section_headings`, and close instructions. A compliant host must produce a
-  record that passes the launcher session parser. When
+- `session_record_contract`: public v2 close contract for the session parser.
+  It includes `heading_pattern`, `title_rule`, ordered `section_headings`,
+  `record_version` (currently `2`), `record_version_marker` (the
+  `<!-- socratic-learn-record-version: 2 -->` HTML comment placed after the
+  heading), and `instruction` text. Version 2 records use evidence identifiers
+  `[E#]` in **Concepts established** and **Application evidence**, progress
+  identifiers `[P#]` only in **Application evidence**, and gap identifiers
+  `[G#]` in **Remaining gaps** and **Next step**. The same `[E#]` set must
+  appear in **Concepts established** and **Application evidence**; **Next step**
+  must list a nonempty subset of the `[G#]` identifiers in **Remaining gaps**
+  when gaps remain, and both gap sections use exactly `- None.` when no gaps
+  remain. Structured application bullets require exactly five pipe-separated
+  fields in order: `Task`, `Conditions`, `Result`, `Support`, and `Limits`.
+  Empty structured sections use exactly one sentinel bullet: `- None.` for
+  concepts and gaps (including **Next step** when there are no gaps), and
+  `- None collected.` for application evidence. Keep
+  `E`/`P`/`G` identifiers in the private record only; never expose them in
+  learner-facing conversation. A compliant host must produce a record that
+  passes the launcher session parser. When
   `prior_complete_encounter_role` is `prior_evidence_only` or
   `must_reestablish_current_state` is true after an interrupted launch, resume
   uses structured session summaries and `prior_complete_encounter_path`, not

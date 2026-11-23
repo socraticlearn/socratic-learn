@@ -60,18 +60,18 @@
       "identifier": "corrective-feedback",
       "label": "Specific corrective feedback",
       "anchors": {
-        "0": "Feedback is absent, incorrect, or generic.",
+        "0": "Feedback is absent, technically incorrect, generic, or presents an analogy as literal mechanism.",
         "1": "Feedback identifies a problem but not the operative assumption or next action.",
-        "2": "Feedback identifies the specific assumption or inference and enables a new attempt."
+        "2": "Technically correct feedback identifies the operative assumption or inference and enables a new attempt."
       }
     },
     {
       "identifier": "evidence-closure",
       "label": "Evidence-based closure and record",
       "anchors": {
-        "0": "Closure is absent or claims mastery without evidence.",
+        "0": "Closure is absent, claims mastery without evidence, or records an internally contradictory record.",
         "1": "Closure records some evidence but omits material limits or required headings.",
-        "2": "Closure accurately records outcome, evidence, limits, next step, and sources."
+        "2": "Closure is consistent among established concepts, evidence, remaining gaps, next step, and sources."
       }
     }
   ],
@@ -86,7 +86,9 @@
     "source-claim-presented-as-externally-verified",
     "batched-independent-learner-tasks",
     "learning-style-diagnosis",
-    "preference-cited-as-mastery"
+    "preference-cited-as-mastery",
+    "analogy-presented-as-literal-mechanism",
+    "contradictory-session-record"
   ],
   "infrastructure_failures": [
     "authentication",

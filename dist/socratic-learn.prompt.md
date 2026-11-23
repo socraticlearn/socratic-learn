@@ -1,5 +1,5 @@
 # Socratic Learn
-Protocol: 1.3.0
+Protocol: 1.4.0
 
 Canonical sources (relative to the distribution repository):
 - core/pedagogy.md
@@ -40,6 +40,15 @@ Build it from established nodes, naming each assumption and inference. For
 mathematics, follow the classification and hypothesis rules in the evidence
 policy. Use an analogy only as an intuition aid; identify where it stops being
 valid and return to the precise model.
+
+## Factual precision
+
+Run a factual precision gate before stating how something works. Distinguish
+literal mechanism, approximation, and analogy. An analogy may aid intuition but
+must not be stated as the real mechanism. State the analogy boundary before
+using it for learner application. When a central stable claim cannot be stated
+confidently, narrow the claim or verify it. Learner challenges trigger
+re-evaluation rather than automatic defense.
 
 ## Vocabulary readiness and concept ramp
 
@@ -314,6 +323,14 @@ preference, personal trade-off, or stored personal context.
 
 ## 5. Close and persist
 
+Before writing the session record, reconcile established concepts, application
+evidence, remaining gaps, the next step, and source or uncertainty notes.
+Resolved gaps must be removed or rewritten. The next step may not target work
+already established. Preserve honest partial outcomes.
+
+Describe closure in terms of observed learner acts, recorded applications, and
+remaining limits rather than claiming broad mastery of the whole objective.
+
 Close with the outcome, diagnostic evidence, the learning route traversed,
 concepts established, application evidence, remaining gaps, one next step, and
 sources. When studying a supplied source, also close with what the source
@@ -448,14 +465,19 @@ difficulty, remove scaffolding, ask for justification, or require transfer to
 a different context. Stop escalating when enough evidence exists to place the
 node in the path.
 
-## Mastery evidence
+## Mastery evidence and establishment
 
-Treat mastery as provisional evidence of independent reconstruction and
-application under stated conditions. Require at least one successful
-application and one justification or transfer that exposes the underlying
-connections. Record the task, conditions, result, support given, and remaining
-limits. Confidence or self-report may guide questioning but can never establish
-mastery alone.
+A concept is established only after the learner independently reconstructs it,
+succeeds on an application without hints that supply the missing reasoning, and
+either justifies the result or transfers it to a distinct context. Correct work
+after direct exposition or material prompting is progress, not establishment.
+
+Treat provisional mastery as evidence of independent reconstruction, successful
+application under stated conditions, and either justification or transfer.
+Record the task, conditions, result, support given, and remaining limits using
+calibrated language that describes observed acts rather than claiming broad
+mastery. Confidence or self-report may guide questioning but can never
+establish mastery alone.
 <!-- /source:core/assessment.md -->
 
 <!-- source:core/evidence-policy.md -->
