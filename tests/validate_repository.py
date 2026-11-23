@@ -93,21 +93,46 @@ POSITIONING_SKILL_PATHS = (
     "socratic_learn/templates/pi-skill.md",
 )
 README_POSITIONING_REQUIREMENTS = (
-    "open-source agentic learning framework",
-    "agent-agnostic tutoring layer",
+    "open-source tutoring protocol",
+    "launcher",
+    "portable session memory",
     "any subject",
     "starter curricula",
+)
+README_FORBIDDEN_POSITIONING_TERMS = (
+    "agent-agnostic",
+    "agentic learning framework",
 )
 README_TAGLINE = "Learn any subject. Prove it by doing."
 README_OPENING_PROMISE = "learn any subject"
 README_UNFRIENDLY_DASHES = ("—", "–")
 README_PORTFOLIO_REQUIREMENTS = (
-    "open-source agentic learning framework",
-    "agent-agnostic tutoring layer",
+    "open-source tutoring protocol",
+    "launcher",
+    "portable session memory",
     "real application",
     "private learner records",
     "source-bounded study",
     "research cited in the docs informed design choices",
+)
+README_HOST_MANAGEMENT_REQUIREMENTS = (
+    "socratic host list",
+    "socratic host set",
+    "socratic host clear",
+    "persistent default",
+    "one-session",
+)
+README_EVALUATION_REQUIREMENTS = (
+    "evaluation/fixtures/rubric.json",
+    "synthetic",
+    "do not prove",
+    "human learning outcomes",
+    "retention",
+    "host alone",
+)
+MANUAL_LAUNCHER_CONFIG_PATTERN = re.compile(
+    r"(?:edit|update)\s+`?~/?\.socratic-learn/config\.json`?",
+    re.IGNORECASE,
 )
 _MARKDOWN_WHITESPACE = r"[ \t\r\n]+"
 _PRODUCT_NAME = rf"Socratic{_MARKDOWN_WHITESPACE}Learn"
@@ -218,6 +243,9 @@ SOURCE_STUDY_REQUIREMENTS = (
     "dynamic pages",
     "quota",
     "change agents",
+    "socratic host list",
+    "socratic host set",
+    "socratic host clear",
 )
 README_STANDARD_LIBRARY_RUNTIME_CLAIM = (
     "standard-library python 3.11+ with native and pipx"
@@ -453,6 +481,14 @@ LAUNCHER_ADAPTER_REQUIREMENTS = (
     "`agy`",
     "pi --append-system-prompt protocol -- launch_payload",
     "claude --append-system-prompt-file protocol -- launch_payload",
+    "socratic host list",
+    "socratic host set",
+    "socratic host clear",
+    "persistent default",
+    "--agent",
+    "one-session",
+    "provider",
+    "model",
 )
 ADAPTER_ROOTS = ("adapters",)
 LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
@@ -2021,6 +2057,26 @@ def validate(root: Path) -> list[str]:
             for requirement in README_PORTFOLIO_REQUIREMENTS
         ):
             errors.append("README.md is missing portfolio narrative")
+        if any(
+            term in normalized_readme for term in README_FORBIDDEN_POSITIONING_TERMS
+        ):
+            errors.append("README.md uses retired universal agent positioning")
+        if not all(
+            requirement in normalized_readme
+            for requirement in README_HOST_MANAGEMENT_REQUIREMENTS
+        ):
+            errors.append("README.md is missing host management guidance")
+        evaluation_section = readme_text.split("## Evaluation status", 1)
+        evaluation_text = (
+            evaluation_section[1].split("## Honest limitations", 1)[0].lower()
+            if len(evaluation_section) == 2
+            else ""
+        )
+        if not all(
+            requirement in evaluation_text
+            for requirement in README_EVALUATION_REQUIREMENTS
+        ):
+            errors.append("README.md is missing evaluation status guidance")
         if contains_unsupported_effectiveness_claim(readme_text):
             errors.append("README.md contains an unsupported effectiveness claim")
         if README_STANDARD_LIBRARY_RUNTIME_CLAIM in normalize(readme_text).lower():
@@ -2064,6 +2120,13 @@ def validate(root: Path) -> list[str]:
             for requirement in SOURCE_STUDY_REQUIREMENTS
         ):
             errors.append("docs/source-study.md is missing source-study guidance")
+        if MANUAL_LAUNCHER_CONFIG_PATTERN.search(
+            source_study.read_text(encoding="utf-8")
+        ):
+            errors.append(
+                "docs/source-study.md must document host commands instead of "
+                "manual config.json edits"
+            )
 
     for relative, section_start, section_end in ACTIVE_INSTALLATION_SURFACES:
         path = root / relative
@@ -2136,6 +2199,13 @@ def validate(root: Path) -> list[str]:
         ):
             errors.append(
                 "docs/launcher-adapters.md is missing launcher adapter contracts"
+            )
+        if MANUAL_LAUNCHER_CONFIG_PATTERN.search(
+            launcher_adapters.read_text(encoding="utf-8")
+        ):
+            errors.append(
+                "docs/launcher-adapters.md must document host commands instead of "
+                "manual config.json edits"
             )
 
     errors.extend(portable_documentation_errors(root))

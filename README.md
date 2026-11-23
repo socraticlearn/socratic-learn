@@ -4,10 +4,11 @@
 
 **Learn any subject. Prove it by doing.**
 
-Socratic Learn is an open-source agentic learning framework and agent-agnostic
-tutoring layer you run from the terminal. It works with Pi, Claude Code,
-Antigravity, or a project-local Cursor skill so you can learn any subject through
-guided conversation that closes with real application, not self-reported
+Socratic Learn is an open-source tutoring protocol and launcher with portable
+session memory. You run it from the terminal with a supported host that owns the
+model runtime, provider credentials, and tools. Pi, Claude Code, Antigravity, or
+a project-local Cursor skill can host sessions so you can learn any subject
+through guided conversation that closes with real application, not self-reported
 confidence alone.
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
@@ -51,6 +52,18 @@ supported host installed, signed in, and able to reach a model:
 
 Cursor is a **project integration** (see [Cursor adapter](adapters/cursor/README.md)),
 not a menu launcher host.
+
+### Set a default host
+
+```text
+socratic host list
+socratic host set pi
+socratic host clear
+```
+
+`socratic host set NAME` saves a persistent default for later launches.
+`socratic --agent NAME` is a one-session override and does not change that default.
+`socratic host clear` removes the saved default so the launcher prompts again.
 
 ### Start learning
 
@@ -110,6 +123,17 @@ the protocol and launch payload; it does not read or store provider credentials.
 - Package install is separate from project adapters: after install, use
   `socratic install TARGET PROJECT` (or `python -m socratic_learn install` from a
   source checkout). See [Installation and lifecycle](docs/universal-installation.md).
+
+## Evaluation status
+
+Synthetic scenario suites score hosted sessions against the tracked rubric in
+[evaluation/fixtures/rubric.json](evaluation/fixtures/rubric.json). Example
+reports include
+[article-reading-v1](evaluation/reports/article-reading-v1.md) and the
+[2026-11-06 antigravity baseline](evaluation/reports/2026-11-06-antigravity-baseline.md).
+
+These runs check protocol behavior in scripted scenarios. They do not prove
+human learning outcomes, retention, or superiority over using the host alone.
 
 ## Honest limitations
 

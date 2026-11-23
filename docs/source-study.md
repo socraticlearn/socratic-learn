@@ -72,6 +72,9 @@ have network or shell access under its own policy.
 
 ## Host and agent changes
 
-A quota or model error belongs to the host provider. To change agents, pass
-`--agent` or update `~/.socratic-learn/config.json`. Launch argument details for
-read mode are in [Launcher adapters](launcher-adapters.md).
+A quota or model error belongs to the host provider. To change agents, use
+`socratic host list` to
+see installed hosts and the current default. Use `socratic host set NAME` for a
+persistent default, `socratic host clear` to remove it, or `socratic --agent NAME`
+as a one-session override. Launch argument details for read mode are in
+[Launcher adapters](launcher-adapters.md).

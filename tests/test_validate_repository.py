@@ -130,6 +130,7 @@ README_HEADINGS = (
     "## How a session moves",
     "## Supported launcher hosts",
     "## Privacy and ownership",
+    "## Evaluation status",
     "## Honest limitations",
     "## Documentation",
     "## License",
@@ -138,12 +139,18 @@ README_TAGLINE = "Learn any subject. Prove it by doing."
 README_OPENING_PROMISE = "learn any subject"
 README_UNFRIENDLY_DASHES = ("—", "–")
 README_PORTFOLIO_REQUIREMENTS = (
-    "open-source agentic learning framework",
-    "agent-agnostic tutoring layer",
+    "open-source tutoring protocol",
+    "launcher",
+    "portable session memory",
     "real application",
     "private learner records",
     "source-bounded study",
     "research cited in the docs informed design choices",
+)
+README_HOST_MANAGEMENT_COMMANDS = (
+    "socratic host list",
+    "socratic host set",
+    "socratic host clear",
 )
 README_LAUNCHER_COMMANDS = (
     "socratic",
@@ -306,8 +313,13 @@ class RepositoryValidationTests(unittest.TestCase):
             "docs/research/learner-preference-patterns.md",
             "curricula/mathematics/map.md",
             "curricula/ai/map.md",
+            "evaluation/fixtures/rubric.json",
+            "evaluation/reports/article-reading-v1.md",
+            "evaluation/reports/2026-11-06-antigravity-baseline.md",
         ):
-            shutil.copy2(source_root / relative, root / relative)
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_root / relative, target)
         skill = (
             "---\n"
             "name: socratic-learn\n"
@@ -458,12 +470,16 @@ class RepositoryValidationTests(unittest.TestCase):
                 )
         normalized_opening = normalize(opening).lower()
         for signal in (
-            "open-source agentic learning framework",
-            "agent-agnostic tutoring layer",
+            "open-source tutoring protocol",
+            "launcher",
+            "portable session memory",
             "learn any subject",
         ):
             with self.subTest(signal=signal):
                 self.assertIn(signal.lower(), normalized_opening)
+        for forbidden in ("agent-agnostic", "agentic learning framework"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, normalized_opening)
         self.assertNotIn("tests", opening.lower())
         self.assertNotIn(" | ", opening)
         self.assertNotIn("███████╗", text)
@@ -471,7 +487,7 @@ class RepositoryValidationTests(unittest.TestCase):
         self.assertIn("docs/assets/socratic-learn-hero.png", text)
         self.assertIn("img.shields.io", text)
         self.assertGreaterEqual(len(text.splitlines()), 110)
-        self.assertLessEqual(len(text.splitlines()), 170)
+        self.assertLessEqual(len(text.splitlines()), 185)
         self.assertIn("```mermaid", text)
         self.assertNotIn("learner:", normalized_text.lower())
         self.assertNotIn("tutor:", normalized_text.lower())
@@ -501,7 +517,8 @@ class RepositoryValidationTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIn(command, text)
         for clause in (
-            "open-source agentic learning framework",
+            "open-source tutoring protocol",
+            "portable session memory",
             "does not read or store provider credentials",
             "python 3.11",
             "pipx",
@@ -580,6 +597,75 @@ class RepositoryValidationTests(unittest.TestCase):
         self.assertNotRegex(quick_start, r"(?is)menu unless[^.\n]*--here")
         self.assertTrue(text.endswith("\n"))
 
+    def test_readme_documents_host_management_and_evaluation_status(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        text = (root / "README.md").read_text(encoding="utf-8")
+        normalized = " ".join(text.split()).lower()
+        for command in README_HOST_MANAGEMENT_COMMANDS:
+            with self.subTest(command=command):
+                self.assertIn(command, text)
+        for clause in (
+            "persistent default",
+            "one-session",
+            "socratic --agent",
+            "evaluation/fixtures/rubric.json",
+            "synthetic",
+            "human learning outcomes",
+            "retention",
+            "host alone",
+        ):
+            with self.subTest(clause=clause):
+                self.assertIn(clause, normalized)
+        self.assertIn("## Evaluation status", text)
+
+    def test_validator_rejects_retired_agent_agnostic_positioning(self) -> None:
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+        readme = root / "README.md"
+        text = readme.read_text(encoding="utf-8")
+        readme.write_text(
+            text.replace(
+                "open-source tutoring protocol",
+                "open-source agent-agnostic tutoring protocol",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        self.assertIn(
+            "README.md uses retired universal agent positioning",
+            validate(root),
+        )
+
+    def test_validator_rejects_manual_config_json_host_guidance(self) -> None:
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+        for relative, message in (
+            (
+                "docs/source-study.md",
+                "docs/source-study.md must document host commands instead of "
+                "manual config.json edits",
+            ),
+            (
+                "docs/launcher-adapters.md",
+                "docs/launcher-adapters.md must document host commands instead of "
+                "manual config.json edits",
+            ),
+        ):
+            with self.subTest(relative=relative):
+                path = root / relative
+                path.write_text(
+                    path.read_text(encoding="utf-8").replace(
+                        "socratic host set",
+                        "update `~/.socratic-learn/config.json`",
+                        1,
+                    )
+                    if "socratic host set" in path.read_text(encoding="utf-8")
+                    else path.read_text(encoding="utf-8")
+                    + "\nTo change the default host, update `~/.socratic-learn/config.json`.\n",
+                    encoding="utf-8",
+                )
+                self.assertIn(message, validate(root))
+
     def test_launcher_and_distribution_docs_define_public_contracts(self) -> None:
         root = Path(__file__).resolve().parents[1]
         launcher_path = root / "docs/launcher-adapters.md"
@@ -593,6 +679,11 @@ class RepositoryValidationTests(unittest.TestCase):
             "inherits authentication",
             "inherits terminal",
             "fake executable",
+            "socratic host list",
+            "socratic host set",
+            "socratic host clear",
+            "persistent default",
+            "one-session",
         ):
             with self.subTest(document="launcher adapters", clause=clause):
                 self.assertIn(clause, launcher_normalized)
@@ -906,11 +997,11 @@ class RepositoryValidationTests(unittest.TestCase):
 
     def test_validator_accepts_inline_html_or_autolink_opening_prose(self) -> None:
         paragraphs = (
-            "<https://example.com> presents this open-source agentic learning "
-            "framework and agent-agnostic tutoring layer to help people learn "
+            "<https://example.com> presents this open-source tutoring protocol "
+            "and launcher with portable session memory to help people learn "
             "any subject through real application.",
-            "<span>Visible</span> agents use this open-source agentic learning "
-            "framework and agent-agnostic tutoring layer to help people learn "
+            "<span>Visible</span> hosts use this open-source tutoring protocol "
+            "and launcher with portable session memory to help people learn "
             "any subject through real application.",
         )
         for paragraph in paragraphs:
@@ -963,7 +1054,7 @@ class RepositoryValidationTests(unittest.TestCase):
         readme = root / "README.md"
         text = readme.read_text(encoding="utf-8")
         text = text.replace(
-            "open-source agentic learning framework",
+            "open-source tutoring protocol",
             "terminal learning tool",
         )
         readme.write_text(text, encoding="utf-8")
@@ -999,10 +1090,10 @@ class RepositoryValidationTests(unittest.TestCase):
         temp, root = self.make_root()
         self.addCleanup(temp.cleanup)
         readme = root / "README.md"
-        requirement = "open-source agentic learning framework"
+        requirement = "open-source tutoring protocol"
         text = readme.read_text(encoding="utf-8").replace(
             requirement,
-            "open-source agentic\nlearning framework",
+            "open-source tutoring\nprotocol",
             1,
         )
         readme.write_text(text, encoding="utf-8")

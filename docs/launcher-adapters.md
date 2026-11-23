@@ -13,9 +13,30 @@ Host selection follows this executable detection order:
 2. Claude Code: detect `claude`.
 3. Antigravity: detect `agy`.
 
-An explicit `--agent` selection must be detected. Otherwise the launcher uses
-the saved default if it is still available, or asks the learner to choose and
-saves the result in `~/.socratic-learn/config.json`.
+Manage the persistent default with:
+
+```text
+socratic host list
+socratic host set NAME
+socratic host clear
+```
+
+`socratic host list` shows which launchers are installed and marks the saved
+default. `socratic host set NAME` requires a detected host and stores a persistent
+default for later launches. `socratic host clear` removes that default.
+
+An explicit `--agent` selection must be detected and overrides the saved default
+for that launch only; it is a one-session override and does not change the
+persistent default. If neither applies, the launcher uses the saved default when
+it is still available, otherwise it asks the learner to choose and can save a new
+default with `socratic host set`.
+
+## Ownership boundary
+
+Socratic Learn prepares the tutoring protocol, learner workspace, and launch
+payload. The selected host and its provider keep authentication, quotas, tools,
+model choice, and billing. Socratic Learn does not run models and does not read
+or store provider credentials.
 
 ## Exact command construction
 
@@ -78,8 +99,8 @@ session restoration.
 
 The child inherits authentication from the selected host; Socratic Learn does
 not read or store provider credentials. It also inherits terminal input,
-output, permissions, environment, and host-specific model selection. The
-launcher runs the child in the prepared personal or `--here` workspace and
+output, permissions, environment, and host-specific model and provider policy.
+The launcher runs the child in the prepared personal or `--here` workspace and
 returns the child's exit status.
 
 ## Adding a launcher host
