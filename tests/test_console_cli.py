@@ -85,6 +85,34 @@ class ConsoleCliTests(unittest.TestCase):
             LaunchOptions("doctor", None, False, Path.cwd())
         )
 
+    def test_host_list_avoids_learning_side_effects(self) -> None:
+        stdout = io.StringIO()
+        with (
+            mock.patch("socratic_learn.cli.run_host_cli", return_value=0) as host_cli,
+            contextlib.redirect_stdout(stdout),
+        ):
+            self.assertEqual(0, main(["host", "list"]))
+        host_cli.assert_called_once()
+        self.write_banner.assert_not_called()
+        self.check_for_update.assert_not_called()
+
+    @mock.patch("socratic_learn.cli.run_learning", return_value=0)
+    def test_learn_host_stays_learning_goal(self, run: mock.Mock) -> None:
+        self.assertEqual(0, main(["learn", "host"]))
+        self.assert_banner_written_once()
+        run.assert_called_once_with(
+            LaunchOptions("host", None, False, Path.cwd())
+        )
+
+    def test_help_mentions_host_commands(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            with self.assertRaises(SystemExit) as raised:
+                main(["--help"])
+        self.assertEqual(0, raised.exception.code)
+        self.assertIn("host list", stdout.getvalue())
+        self.write_banner.assert_not_called()
+
     @mock.patch("socratic_learn.cli.administrative_main", return_value=7)
     def test_project_adapter_install_is_forwarded_unchanged(
         self,

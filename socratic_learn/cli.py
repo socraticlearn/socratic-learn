@@ -11,6 +11,7 @@ from socratic_learn import __version__
 from socratic_learn.__main__ import main as administrative_main
 from socratic_learn.banner import write_banner
 from socratic_learn.errors import LearningTutorError, SourceError, UsageError
+from socratic_learn.host_cli import run_host_cli
 from socratic_learn.launcher import LaunchOptions, run_learning
 from socratic_learn.sources.model import SourceRequest
 from socratic_learn.update_check import check_for_update
@@ -79,6 +80,10 @@ def _first_non_option_command_token(arguments: list[str]) -> str | None:
 
 def _read_mode_requested(arguments: list[str]) -> bool:
     return _first_non_option_command_token(arguments) == "read"
+
+
+def _host_mode_requested(arguments: list[str]) -> bool:
+    return _first_non_option_command_token(arguments) == "host"
 
 
 def _reject_disallowed_options(arguments: list[str]) -> None:
@@ -181,6 +186,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "  install\n"
             "  doctor\n"
             "\n"
+            "Host commands:\n"
+            "  host list\n"
+            "  host set NAME\n"
+            "  host clear\n"
+            "\n"
             "Examples:\n"
             "  socratic linear algebra\n"
             "  socratic --agent pi --here linear algebra\n"
@@ -217,6 +227,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return administrative_main(arguments)
 
     try:
+        if _host_mode_requested(arguments):
+            return run_host_cli(arguments, environ=os.environ)
+
         if _read_mode_requested(arguments):
             options = parse_read_arguments(arguments)
             write_banner(sys.stdout, os.environ)
