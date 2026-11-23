@@ -121,10 +121,16 @@ README_HOST_MANAGEMENT_REQUIREMENTS = (
     "socratic host clear",
     "persistent default",
     "one-session",
+    "saves that choice",
+    "next launch",
 )
 README_EVALUATION_REQUIREMENTS = (
     "evaluation/fixtures/rubric.json",
     "evaluation/reports/article-reading-v1.md",
+    "evaluation/reports/2026-11-06-antigravity-baseline.md",
+    "16/16",
+    "no scores",
+    "infrastructure",
     "synthetic",
     "do not prove",
     "human learning outcomes",
@@ -493,6 +499,8 @@ LAUNCHER_ADAPTER_REQUIREMENTS = (
     "persistent default",
     "--agent",
     "one-session",
+    "saves that choice",
+    "next launch",
     "provider",
     "model",
 )
@@ -2074,7 +2082,7 @@ def validate(root: Path) -> list[str]:
             errors.append("README.md is missing host management guidance")
         evaluation_section = readme_text.split("## Evaluation status", 1)
         evaluation_text = (
-            evaluation_section[1].split("## Honest limitations", 1)[0].lower()
+            normalize(evaluation_section[1].split("## Honest limitations", 1)[0]).lower()
             if len(evaluation_section) == 2
             else ""
         )
@@ -2109,6 +2117,17 @@ def validate(root: Path) -> list[str]:
             or order_positions != sorted(order_positions)
         ):
             errors.append("README.md public onboarding is out of order")
+        source_study_quick_start = quick_start_text.lower().partition(
+            "### study a source"
+        )[2]
+        normalized_source_quick_start = normalize(source_study_quick_start)
+        if not all(
+            requirement in normalized_source_quick_start
+            for requirement in SOURCE_STUDY_SCOPE_REQUIREMENTS
+        ):
+            errors.append(
+                "README.md quick start is missing single-source scope guidance"
+            )
         if MENU_SKIP_HERE_PATTERN.search(quick_start_text):
             errors.append(
                 "README.md must not claim --here skips the session menu"

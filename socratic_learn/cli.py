@@ -12,13 +12,14 @@ from socratic_learn.__main__ import main as administrative_main
 from socratic_learn.banner import write_banner
 from socratic_learn.errors import LearningTutorError, SourceError, UsageError
 from socratic_learn.host_cli import run_host_cli
+from socratic_learn.hosts import ADAPTERS
 from socratic_learn.launcher import LaunchOptions, run_learning
 from socratic_learn.sources.model import SourceRequest
 from socratic_learn.update_check import check_for_update
 from socratic_learn.workspace import launcher_home
 
 _ADMIN_COMMANDS = {"build", "export", "install", "doctor"}
-_AGENT_NAMES = frozenset({"pi", "claude", "antigravity"})
+_AGENT_NAMES = tuple(ADAPTERS)
 
 
 def _write_update_notice() -> None:
@@ -155,7 +156,7 @@ def parse_read_arguments(
     if agent is not None and agent not in _AGENT_NAMES:
         raise UsageError(
             f"invalid agent '{agent}'",
-            remediation="choose one of: pi, claude, antigravity",
+            remediation=f"choose one of: {', '.join(_AGENT_NAMES)}",
         )
 
     source_token = remaining[0]
@@ -200,7 +201,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--agent",
-        choices=("pi", "claude", "antigravity"),
+        choices=_AGENT_NAMES,
         help="select a compatible installed agent",
     )
     parser.add_argument(

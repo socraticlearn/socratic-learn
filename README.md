@@ -63,7 +63,13 @@ socratic host clear
 
 `socratic host set NAME` saves a persistent default for later launches.
 `socratic --agent NAME` is a one-session override and does not change that default.
-`socratic host clear` removes the saved default so the launcher prompts again.
+When no usable default exists (none saved, or the saved host is no longer
+installed), the launcher asks you to choose a host and saves that choice as the
+new default. `socratic host clear` removes the saved default, so the next launch
+prompts again and saves the choice you make.
+
+Launcher options do not apply to host commands: combining `--agent`, `--here`,
+or `--allow-private-network` with `socratic host ...` is a usage error.
 
 ### Start learning
 
@@ -86,6 +92,9 @@ socratic read https://example.org/article
 socratic read paper.pdf
 socratic read paper.pdf evaluate the main claim and its evidence
 ```
+
+Each session studies one source. It is not a multi-source research workflow:
+to study another source, start another `socratic read` session.
 
 Limits, bundle layout, and safety notes are in [Source study](docs/source-study.md).
 
@@ -127,13 +136,17 @@ the protocol and launch payload; it does not read or store provider credentials.
 ## Evaluation status
 
 Synthetic scenario suites score hosted sessions against the tracked rubric in
-[evaluation/fixtures/rubric.json](evaluation/fixtures/rubric.json). Example
-reports include
-[article-reading-v1](evaluation/reports/article-reading-v1.md) and the
-[2026-11-06 antigravity baseline](evaluation/reports/2026-11-06-antigravity-baseline.md).
+[evaluation/fixtures/rubric.json](evaluation/fixtures/rubric.json). Only one
+scenario has a scored tracked run: article-reading scored 16/16 on one runtime
+and model
+([article-reading-v1, 16/16](evaluation/reports/article-reading-v1.md)).
 
-These runs check protocol behavior in scripted scenarios. They do not prove
-human learning outcomes, retention, or superiority over using the host alone.
+The earlier
+[2026-11-06 antigravity baseline (no scores)](evaluation/reports/2026-11-06-antigravity-baseline.md)
+produced no scores: every scenario stopped on a runtime infrastructure failure.
+
+These runs check protocol behavior in scripted, synthetic scenarios. They do not
+prove human learning outcomes, retention, or superiority over using the host alone.
 
 ## Honest limitations
 

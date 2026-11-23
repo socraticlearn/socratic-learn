@@ -7,63 +7,72 @@ import shutil
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import TextIO
+from typing import Literal, TextIO
 
 from socratic_learn.config import LauncherConfig, load_config, save_config
 from socratic_learn.errors import LearningTutorError, UsageError
 from socratic_learn.hosts import ADAPTERS, AgentName, detect_hosts
 from socratic_learn.workspace import launcher_home
 
-HostCommand = str | tuple[str, AgentName]
+HostCommand = Literal["list", "clear"] | tuple[Literal["set"], AgentName]
+
+_LAUNCHER_ONLY_OPTIONS = ("--agent", "--here", "--allow-private-network")
+_HOST_USAGE = "socratic host list|set NAME|clear"
+_LEARN_HOST_ESCAPE = (
+    "to learn about 'host' as a topic, run 'socratic learn host ...'"
+)
 
 
-def _host_option_tokens() -> frozenset[str]:
-    return frozenset({"--here"})
+def _host_remediation(detail: str | None = None) -> str:
+    parts = [f"use '{_HOST_USAGE}'"]
+    if detail is not None:
+        parts.append(detail)
+    parts.append(_LEARN_HOST_ESCAPE)
+    return "; ".join(parts)
+
+
+def _launcher_only_option(argument: str) -> str | None:
+    for option in _LAUNCHER_ONLY_OPTIONS:
+        if argument == option or argument.startswith(f"{option}="):
+            return option
+    return None
 
 
 def parse_host_arguments(arguments: Sequence[str]) -> HostCommand:
-    """Parse `host` subcommands from argv that may include launcher options."""
+    """Parse `host` subcommands; launcher-only options are not accepted."""
     positionals: list[str] = []
-    index = 0
     argv = list(arguments)
-    while index < len(argv):
-        argument = argv[index]
+    for index, argument in enumerate(argv):
         if argument == "--":
             positionals.extend(argv[index + 1 :])
             break
-        if argument == "--agent":
-            if index + 1 >= len(argv):
-                raise UsageError(
-                    "argument --agent: expected one argument",
-                    remediation="run 'socratic host list|set|clear'",
-                )
-            index += 2
-            continue
-        if argument.startswith("--agent="):
-            index += 1
-            continue
-        if argument in _host_option_tokens():
-            index += 1
-            continue
+        option = _launcher_only_option(argument)
+        if option is not None:
+            raise UsageError(
+                f"{option} cannot be used with host commands",
+                remediation=_host_remediation(
+                    f"remove {option}; for a one-session host choice during "
+                    "learning, run 'socratic --agent NAME'"
+                ),
+            )
         if argument.startswith("-"):
             raise UsageError(
                 f"unrecognized arguments: {argument}",
-                remediation="run 'socratic --help'",
+                remediation=_host_remediation(),
             )
         positionals.append(argument)
-        index += 1
 
     if not positionals or positionals[0] != "host":
         raise UsageError(
             "host command was not found",
-            remediation="use 'socratic host list|set|clear'",
+            remediation=f"use '{_HOST_USAGE}'",
         )
 
     rest = positionals[1:]
     if not rest:
         raise UsageError(
             "host command requires a subcommand",
-            remediation="use 'socratic host list|set|clear'",
+            remediation=_host_remediation(),
         )
 
     subcommand = rest[0]
@@ -84,10 +93,15 @@ def parse_host_arguments(arguments: Sequence[str]) -> HostCommand:
         return "clear"
 
     if subcommand == "set":
-        if len(rest) != 2:
+        if len(rest) < 2:
             raise UsageError(
                 "host set requires a host name",
                 remediation="use 'socratic host set NAME'",
+            )
+        if len(rest) > 2:
+            raise UsageError(
+                "too many arguments for 'host set'",
+                remediation="use 'socratic host set NAME' with exactly one host name",
             )
         name = rest[1]
         for agent in ADAPTERS:
@@ -95,12 +109,12 @@ def parse_host_arguments(arguments: Sequence[str]) -> HostCommand:
                 return ("set", agent)
         raise UsageError(
             f"invalid host '{name}'",
-            remediation="choose one of: pi, claude, antigravity",
+            remediation=f"choose one of: {', '.join(ADAPTERS)}",
         )
 
     raise UsageError(
         f"unknown host subcommand '{subcommand}'",
-        remediation="use 'socratic host list|set|clear'",
+        remediation=_host_remediation(),
     )
 
 
@@ -150,6 +164,7 @@ def _command_set(
     *,
     which: Callable[[str], str | None],
     environ: Mapping[str, str],
+    stdout: TextIO,
 ) -> None:
     config_path = _config_path(environ)
     load_config(config_path)
@@ -160,12 +175,14 @@ def _command_set(
             remediation="install the host executable and retry, or run 'socratic host list'",
         )
     save_config(config_path, LauncherConfig(default_agent=name))
+    stdout.write(f"Default host set to {name}.\n")
 
 
-def _command_clear(*, environ: Mapping[str, str]) -> None:
+def _command_clear(*, environ: Mapping[str, str], stdout: TextIO) -> None:
     config_path = _config_path(environ)
     load_config(config_path)
     save_config(config_path, LauncherConfig(default_agent=None))
+    stdout.write("Default host cleared.\n")
 
 
 def run_host_cli(
@@ -182,13 +199,12 @@ def run_host_cli(
     err = sys.stderr if stderr is None else stderr
     try:
         command = parse_host_arguments(arguments)
-        if command == "list":
+        if isinstance(command, tuple):
+            _command_set(command[1], which=which, environ=environment, stdout=out)
+        elif command == "list":
             _command_list(which=which, environ=environment, stdout=out)
-        elif command == "clear":
-            _command_clear(environ=environment)
         else:
-            assert isinstance(command, tuple)
-            _command_set(command[1], which=which, environ=environment)
+            _command_clear(environ=environment, stdout=out)
         return 0
     except LearningTutorError as error:
         print(f"error: {error}", file=err)

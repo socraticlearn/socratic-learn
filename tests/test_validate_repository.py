@@ -633,6 +633,131 @@ class RepositoryValidationTests(unittest.TestCase):
                 self.assertIn(clause, evaluation_text)
         self.assertIn("## Evaluation status", text)
 
+    def test_readme_evaluation_status_matches_tracked_reports(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        text = (root / "README.md").read_text(encoding="utf-8")
+        evaluation_text = text.split("## Evaluation status", 1)[1].split(
+            "## Honest limitations",
+            1,
+        )[0]
+        normalized = " ".join(evaluation_text.split()).lower()
+        for clause in (
+            "only",
+            "article-reading",
+            "16/16",
+            "one runtime",
+            "no scores",
+            "infrastructure",
+            "synthetic",
+            "do not prove",
+        ):
+            with self.subTest(clause=clause):
+                self.assertIn(clause, normalized)
+        labels = {
+            target: label.lower()
+            for label, target in re.findall(r"\[([^\]]+)\]\(([^)]+)\)", evaluation_text)
+        }
+        article = labels["evaluation/reports/article-reading-v1.md"]
+        baseline = labels["evaluation/reports/2026-11-06-antigravity-baseline.md"]
+        self.assertIn("16/16", article)
+        self.assertIn("no scores", baseline)
+        self.assertNotIn("16/16", baseline)
+
+    def test_validator_rejects_inaccurate_evaluation_status(self) -> None:
+        for requirement in (
+            "16/16",
+            "no scores",
+            "infrastructure",
+            "evaluation/reports/2026-11-06-antigravity-baseline.md",
+        ):
+            with self.subTest(requirement=requirement):
+                temp, root = self.make_root()
+                self.addCleanup(temp.cleanup)
+                readme = root / "README.md"
+                readme.write_text(
+                    requirement_pattern(requirement).sub(
+                        "redacted",
+                        readme.read_text(encoding="utf-8"),
+                    ),
+                    encoding="utf-8",
+                )
+                self.assertIn(
+                    "README.md is missing evaluation status guidance",
+                    validate(root),
+                )
+
+    def test_default_host_prompt_behavior_is_documented_accurately(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        host_section = readme.split("### Set a default host", 1)[1].split(
+            "### Start learning",
+            1,
+        )[0]
+        documents = {
+            "README host section": host_section,
+            "launcher adapters": (root / "docs/launcher-adapters.md").read_text(
+                encoding="utf-8"
+            ),
+        }
+        for name, document in documents.items():
+            normalized = " ".join(document.split()).lower()
+            for clause in ("asks", "choose", "saves that choice", "next launch"):
+                with self.subTest(document=name, clause=clause):
+                    self.assertIn(clause, normalized)
+        self.assertNotIn(
+            "can save a new default",
+            documents["launcher adapters"].lower(),
+        )
+
+    def test_validator_rejects_missing_default_host_prompt_behavior(self) -> None:
+        for relative, message in (
+            ("README.md", "README.md is missing host management guidance"),
+            (
+                "docs/launcher-adapters.md",
+                "docs/launcher-adapters.md is missing launcher adapter contracts",
+            ),
+        ):
+            for requirement in ("saves that choice", "next launch"):
+                with self.subTest(relative=relative, requirement=requirement):
+                    temp, root = self.make_root()
+                    self.addCleanup(temp.cleanup)
+                    path = root / relative
+                    path.write_text(
+                        requirement_pattern(requirement).sub(
+                            "redacted",
+                            path.read_text(encoding="utf-8"),
+                        ),
+                        encoding="utf-8",
+                    )
+                    self.assertIn(message, validate(root))
+
+    def test_readme_quick_start_documents_single_source_scope(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        text = (root / "README.md").read_text(encoding="utf-8")
+        study = text.split("### Study a source", 1)[1].split("## ", 1)[0]
+        normalized = " ".join(study.split()).lower()
+        for term in ("one source", "multi-source"):
+            with self.subTest(term=term):
+                self.assertIn(term, normalized)
+
+    def test_validator_rejects_readme_missing_single_source_scope(self) -> None:
+        for requirement in ("one source", "multi-source"):
+            with self.subTest(requirement=requirement):
+                temp, root = self.make_root()
+                self.addCleanup(temp.cleanup)
+                readme = root / "README.md"
+                readme.write_text(
+                    requirement_pattern(requirement).sub(
+                        "redacted",
+                        readme.read_text(encoding="utf-8"),
+                    ),
+                    encoding="utf-8",
+                )
+                self.assertIn(
+                    "README.md quick start is missing single-source scope guidance",
+                    validate(root),
+                )
+
     def test_source_study_documents_single_source_scope(self) -> None:
         root = Path(__file__).resolve().parents[1]
         text = normalize(

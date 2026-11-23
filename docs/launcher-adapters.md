@@ -23,13 +23,19 @@ socratic host clear
 
 `socratic host list` shows which launchers are installed and marks the saved
 default. `socratic host set NAME` requires a detected host and stores a persistent
-default for later launches. `socratic host clear` removes that default.
+default for later launches. `socratic host clear` removes that default. Host
+commands do not accept the launcher options `--agent`, `--here`, or
+`--allow-private-network`; combining them with `socratic host ...` is a usage
+error.
 
 An explicit `--agent` selection must be detected and overrides the saved default
 for that launch only; it is a one-session override and does not change the
-persistent default. If neither applies, the launcher uses the saved default when
-it is still available, otherwise it asks the learner to choose and can save a new
-default with `socratic host set`.
+persistent default. Without an explicit selection, the launcher uses the saved
+default when it is still installed. When no usable default exists (none saved,
+or the saved host is no longer installed), the launcher asks the user to choose
+and automatically saves that choice as the new default. After
+`socratic host clear`, the next launch therefore prompts, and the choice made
+then is saved again.
 
 ## Ownership boundary
 

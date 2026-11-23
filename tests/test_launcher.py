@@ -279,6 +279,36 @@ class LauncherTests(unittest.TestCase):
                 (home / "config.json").read_text(encoding="utf-8"),
             )
 
+    def test_explicit_agent_overrides_saved_default_without_changing_config(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            saved = '{"schema_version": 1, "default_agent": "pi"}\n'
+            config_path = home / "config.json"
+            config_path.write_text(saved, encoding="utf-8")
+            calls: list[list[str]] = []
+
+            def fake_run(
+                argv: list[str], *, cwd: Path, check: bool
+            ) -> CompletedProcess[str]:
+                calls.append(argv)
+                return CompletedProcess(argv, 0)
+
+            result = run_learning(
+                LaunchOptions("logic", "claude", False, Path.cwd()),
+                input_fn=lambda prompt: self.fail("must not prompt"),
+                output=io.StringIO(),
+                which={"pi": "C:/bin/pi.exe", "claude": "C:/bin/claude.exe"}.get,
+                run_process=fake_run,
+                environ={"SOCRATIC_LEARN_HOME": temporary},
+            )
+
+            self.assertEqual(0, result)
+            self.assertEqual(1, len(calls))
+            self.assertIn("claude", Path(calls[0][0]).name.lower())
+            self.assertEqual(saved, config_path.read_text(encoding="utf-8"))
+
     def test_agent_selection_accepts_only_a_listed_number(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             answers = iter(["claude", "0", "3", "2"])
