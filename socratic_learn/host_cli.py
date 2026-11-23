@@ -90,12 +90,13 @@ def parse_host_arguments(arguments: Sequence[str]) -> HostCommand:
                 remediation="use 'socratic host set NAME'",
             )
         name = rest[1]
-        if name not in ADAPTERS:
-            raise UsageError(
-                f"invalid host '{name}'",
-                remediation="choose one of: pi, claude, antigravity",
-            )
-        return ("set", name)  # type: ignore[return-value]
+        for agent in ADAPTERS:
+            if agent == name:
+                return ("set", agent)
+        raise UsageError(
+            f"invalid host '{name}'",
+            remediation="choose one of: pi, claude, antigravity",
+        )
 
     raise UsageError(
         f"unknown host subcommand '{subcommand}'",
@@ -150,17 +151,21 @@ def _command_set(
     which: Callable[[str], str | None],
     environ: Mapping[str, str],
 ) -> None:
+    config_path = _config_path(environ)
+    load_config(config_path)
     detected = detect_hosts(which)
     if name not in detected:
         raise UsageError(
             f"host '{name}' was not detected",
             remediation="install the host executable and retry, or run 'socratic host list'",
         )
-    save_config(_config_path(environ), LauncherConfig(default_agent=name))
+    save_config(config_path, LauncherConfig(default_agent=name))
 
 
 def _command_clear(*, environ: Mapping[str, str]) -> None:
-    save_config(_config_path(environ), LauncherConfig(default_agent=None))
+    config_path = _config_path(environ)
+    load_config(config_path)
+    save_config(config_path, LauncherConfig(default_agent=None))
 
 
 def run_host_cli(

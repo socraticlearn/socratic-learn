@@ -85,16 +85,25 @@ class ConsoleCliTests(unittest.TestCase):
             LaunchOptions("doctor", None, False, Path.cwd())
         )
 
-    def test_host_list_avoids_learning_side_effects(self) -> None:
-        stdout = io.StringIO()
-        with (
-            mock.patch("socratic_learn.cli.run_host_cli", return_value=0) as host_cli,
-            contextlib.redirect_stdout(stdout),
-        ):
-            self.assertEqual(0, main(["host", "list"]))
-        host_cli.assert_called_once()
-        self.write_banner.assert_not_called()
-        self.check_for_update.assert_not_called()
+    @mock.patch("socratic_learn.cli.run_learning", return_value=0)
+    def test_host_commands_avoid_learning_side_effects(
+        self,
+        run: mock.Mock,
+    ) -> None:
+        for arguments in (["host", "list"], ["host", "set", "pi"], ["host", "clear"]):
+            with self.subTest(arguments=arguments):
+                with mock.patch(
+                    "socratic_learn.cli.run_host_cli",
+                    return_value=0,
+                ) as host_cli:
+                    self.assertEqual(0, main(arguments))
+                host_cli.assert_called_once()
+                run.assert_not_called()
+                self.write_banner.assert_not_called()
+                self.check_for_update.assert_not_called()
+                run.reset_mock()
+                self.write_banner.reset_mock()
+                self.check_for_update.reset_mock()
 
     @mock.patch("socratic_learn.cli.run_learning", return_value=0)
     def test_learn_host_stays_learning_goal(self, run: mock.Mock) -> None:

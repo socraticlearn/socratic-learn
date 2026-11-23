@@ -20,7 +20,7 @@ class ParseHostArgumentsTests(unittest.TestCase):
     def test_clear_after_host_token(self) -> None:
         self.assertEqual("clear", parse_host_arguments(["host", "clear"]))
 
-    def test_set_requires_detected_name(self) -> None:
+    def test_set_parses_supported_host_id_without_detection(self) -> None:
         self.assertEqual(("set", "pi"), parse_host_arguments(["host", "set", "pi"]))
 
     def test_options_before_host_are_ignored(self) -> None:
@@ -93,6 +93,63 @@ class HostCliBehaviorTests(unittest.TestCase):
                     environ=self._home_environ(home),
                 )
         self.assertEqual(IntegrityError.exit_code, exit_code)
+        self.assertIn("not valid JSON", stderr.getvalue())
+
+    def test_list_marks_saved_missing_default(self) -> None:
+        stdout = io.StringIO()
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            (home / "config.json").write_text(
+                '{"schema_version": 1, "default_agent": "claude"}\n',
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                0,
+                run_host_cli(
+                    ["host", "list"],
+                    which=lambda name: None,
+                    environ=self._home_environ(home),
+                    stdout=stdout,
+                ),
+            )
+        self.assertIn("claude: missing [default]", stdout.getvalue().splitlines())
+
+    def test_set_corrupt_config_raises_integrity_error_without_mutation(
+        self,
+    ) -> None:
+        stderr = io.StringIO()
+        corrupt = "{broken"
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            path = home / "config.json"
+            path.write_text(corrupt, encoding="utf-8")
+            with contextlib.redirect_stderr(stderr):
+                exit_code = run_host_cli(
+                    ["host", "set", "pi"],
+                    which={"pi": "pi"}.get,
+                    environ=self._home_environ(home),
+                )
+            self.assertEqual(IntegrityError.exit_code, exit_code)
+            self.assertEqual(corrupt, path.read_text(encoding="utf-8"))
+        self.assertIn("not valid JSON", stderr.getvalue())
+
+    def test_clear_corrupt_config_raises_integrity_error_without_mutation(
+        self,
+    ) -> None:
+        stderr = io.StringIO()
+        corrupt = "{broken"
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            path = home / "config.json"
+            path.write_text(corrupt, encoding="utf-8")
+            with contextlib.redirect_stderr(stderr):
+                exit_code = run_host_cli(
+                    ["host", "clear"],
+                    which=lambda name: None,
+                    environ=self._home_environ(home),
+                )
+            self.assertEqual(IntegrityError.exit_code, exit_code)
+            self.assertEqual(corrupt, path.read_text(encoding="utf-8"))
         self.assertIn("not valid JSON", stderr.getvalue())
 
     def test_set_persists_default_when_detected(self) -> None:
