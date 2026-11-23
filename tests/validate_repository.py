@@ -124,11 +124,17 @@ README_HOST_MANAGEMENT_REQUIREMENTS = (
 )
 README_EVALUATION_REQUIREMENTS = (
     "evaluation/fixtures/rubric.json",
+    "evaluation/reports/article-reading-v1.md",
     "synthetic",
     "do not prove",
     "human learning outcomes",
     "retention",
+    "superiority",
     "host alone",
+)
+SOURCE_STUDY_SCOPE_REQUIREMENTS = (
+    "one source",
+    "multi-source",
 )
 MANUAL_LAUNCHER_CONFIG_PATTERN = re.compile(
     r"(?:edit|update)\s+`?~/?\.socratic-learn/config\.json`?",
@@ -2126,6 +2132,13 @@ def validate(root: Path) -> list[str]:
             errors.append(
                 "docs/source-study.md must document host commands instead of "
                 "manual config.json edits"
+            )
+        if not all(
+            requirement in source_text
+            for requirement in SOURCE_STUDY_SCOPE_REQUIREMENTS
+        ):
+            errors.append(
+                "docs/source-study.md is missing single-source scope guidance"
             )
 
     for relative, section_start, section_end in ACTIVE_INSTALLATION_SURFACES:

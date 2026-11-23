@@ -600,23 +600,63 @@ class RepositoryValidationTests(unittest.TestCase):
     def test_readme_documents_host_management_and_evaluation_status(self) -> None:
         root = Path(__file__).resolve().parents[1]
         text = (root / "README.md").read_text(encoding="utf-8")
-        normalized = " ".join(text.split()).lower()
+        quick_start = text.split("## Quick start", 1)[1].split(
+            "## How a session moves",
+            1,
+        )[0]
+        quick_start_normalized = " ".join(quick_start.split()).lower()
+        evaluation_section = text.split("## Evaluation status", 1)
+        self.assertEqual(len(evaluation_section), 2)
+        evaluation_text = (
+            evaluation_section[1].split("## Honest limitations", 1)[0].lower()
+        )
         for command in README_HOST_MANAGEMENT_COMMANDS:
             with self.subTest(command=command):
-                self.assertIn(command, text)
+                self.assertIn(command, quick_start)
         for clause in (
             "persistent default",
             "one-session",
             "socratic --agent",
+        ):
+            with self.subTest(clause=clause):
+                self.assertIn(clause, quick_start_normalized)
+        for clause in (
             "evaluation/fixtures/rubric.json",
+            "evaluation/reports/article-reading-v1.md",
             "synthetic",
             "human learning outcomes",
             "retention",
+            "superiority",
             "host alone",
         ):
             with self.subTest(clause=clause):
-                self.assertIn(clause, normalized)
+                self.assertIn(clause, evaluation_text)
         self.assertIn("## Evaluation status", text)
+
+    def test_source_study_documents_single_source_scope(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        text = normalize(
+            (root / "docs/source-study.md").read_text(encoding="utf-8")
+        ).lower()
+        for term in ("one source", "multi-source"):
+            with self.subTest(term=term):
+                self.assertIn(term, text)
+
+    def test_validator_rejects_missing_single_source_scope(self) -> None:
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+        source_study = root / "docs/source-study.md"
+        text = source_study.read_text(encoding="utf-8")
+        text = text.replace("one source", "one input", 1).replace(
+            "multi-source",
+            "cross-source",
+            1,
+        )
+        source_study.write_text(text, encoding="utf-8")
+        self.assertIn(
+            "docs/source-study.md is missing single-source scope guidance",
+            validate(root),
+        )
 
     def test_validator_rejects_retired_agent_agnostic_positioning(self) -> None:
         temp, root = self.make_root()

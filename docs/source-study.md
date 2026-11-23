@@ -4,6 +4,9 @@
 source-bounded learning session. `socratic learn` (or a bare `socratic` launch)
 starts general learning without a fixed document.
 
+Each session studies one source at a time. The mode is not a multi-source
+research workflow.
+
 ## Commands
 
 ```text
