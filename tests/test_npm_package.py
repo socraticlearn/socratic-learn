@@ -29,6 +29,18 @@ class NpmPackageBuildTests(unittest.TestCase):
             ["packaging>=26.1,<27", "pypdf>=7.0,<8"],
             project["project"]["dependencies"],
         )
+        packaging = re.search(
+            r"^packaging==(\d+\.\d+(?:\.\d+)?) \\\s*"
+            r"--hash=sha256:([a-f0-9]{64})$",
+            lock,
+            re.MULTILINE,
+        )
+        self.assertIsNotNone(packaging, "packaging pin and hash must be present")
+        self.assertEqual("26.1", packaging.group(1))
+        self.assertEqual(
+            "5d9c0669c6285e491e0ced2eee587eaf67b670d94a19e94e3984a481aba6802f",
+            packaging.group(2),
+        )
         match = re.search(r"^pypdf==(7\.\d+\.\d+)", lock, re.MULTILINE)
         self.assertIsNotNone(match)
         version = tuple(int(part) for part in match.group(1).split("."))

@@ -16,7 +16,7 @@ describe('vendor-requirements.lock', () => {
 
     assert.match(
       lock,
-      /^packaging==26\.\d+(?:\.\d+)? \\\s*--hash=sha256:[a-f0-9]{64}$/m,
+      /^packaging==26\.1 \\\s*--hash=sha256:5d9c0669c6285e491e0ced2eee587eaf67b670d94a19e94e3984a481aba6802f$/m,
     );
     assert.match(pyproject, /"packaging>=26\.1,<27"/);
     assert.match(lock, /^pypdf==7\.\d+\.\d+ \\\s*--hash=sha256:[a-f0-9]{64}$/m);
