@@ -762,6 +762,32 @@ class EvaluationReportTests(unittest.TestCase):
         )
         validate_baseline_report(path.read_text(encoding="utf-8"))
 
+    def test_report_title_is_neutral_for_every_suite_and_tracked_report(self) -> None:
+        neutral = "# Socratic Learn Semantic Evaluation \u2014 2026-11-06"
+        retired = "# Antigravity Semantic Baseline \u2014 2026-11-06"
+
+        baseline_report = self.render(disclosure())
+        self.assertEqual(neutral, baseline_report.splitlines()[0])
+        validate_baseline_report(baseline_report)
+
+        with self.subTest(report="rendered retired title"):
+            body = baseline_report.split("\n", 1)[1]
+            with self.assertRaisesRegex(ValueError, "title is invalid"):
+                validate_baseline_report(f"{retired}\n{body}")
+
+        reports = Path(__file__).resolve().parents[1] / "evaluation/reports"
+        tracked = sorted(reports.glob("*.md"))
+        self.assertEqual(
+            {"2026-11-06-antigravity-baseline.md", "article-reading-v1.md"},
+            {path.name for path in tracked},
+        )
+        for path in tracked:
+            with self.subTest(report=path.name):
+                text = path.read_text(encoding="utf-8")
+                self.assertEqual(neutral, text.splitlines()[0])
+                self.assertNotIn("Semantic Baseline", text.splitlines()[0])
+                validate_baseline_report(text)
+
 
 
     def test_article_long_turn_quotations_render_within_limit(self) -> None:

@@ -30,7 +30,7 @@ from evaluation.schema import (
 )
 
 
-TITLE = "# Antigravity Semantic Baseline — 2026-11-06"
+TITLE = "# Socratic Learn Semantic Evaluation — 2026-11-06"
 PRIVACY_STATEMENT = (
     "Raw Antigravity streams, runtime logs, provider metadata, and evaluator notes "
     "remain only under ignored .semantic-runs/. Temporary learner homes and working "

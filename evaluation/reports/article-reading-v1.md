@@ -1,4 +1,4 @@
-# Antigravity Semantic Baseline — 2026-11-06
+# Socratic Learn Semantic Evaluation — 2026-11-06
 
 ## Evaluation identity
 - Suite ID: article-reading-v1
