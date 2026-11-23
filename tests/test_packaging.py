@@ -52,7 +52,7 @@ class PackagingTests(unittest.TestCase):
             project["project"]["scripts"],
         )
         self.assertEqual(
-            ["packaging>=25.0,<26", "pypdf>=7.0,<8"],
+            ["packaging>=26.1,<27", "pypdf>=7.0,<8"],
             project["project"]["dependencies"],
         )
         self.assertEqual(
@@ -64,7 +64,7 @@ class PackagingTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         project = tomllib.loads((root / "pyproject.toml").read_text("utf-8"))
         self.assertEqual(
-            ["packaging>=25.0,<26", "pypdf>=7.0,<8"],
+            ["packaging>=26.1,<27", "pypdf>=7.0,<8"],
             project["project"]["dependencies"],
         )
 

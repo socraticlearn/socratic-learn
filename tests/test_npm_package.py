@@ -26,7 +26,7 @@ class NpmPackageBuildTests(unittest.TestCase):
         lock = (self.npm_cli / "vendor-requirements.lock").read_text("utf-8")
         project = tomllib.loads((self.root / "pyproject.toml").read_text("utf-8"))
         self.assertEqual(
-            ["packaging>=25.0,<26", "pypdf>=7.0,<8"],
+            ["packaging>=26.1,<27", "pypdf>=7.0,<8"],
             project["project"]["dependencies"],
         )
         match = re.search(r"^pypdf==(7\.\d+\.\d+)", lock, re.MULTILINE)

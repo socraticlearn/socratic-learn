@@ -18,7 +18,7 @@ classifiers = [
   "Topic :: Education",
 ]
 dependencies = [
-  "packaging>=25.0,<26",
+  "packaging>=26.1,<27",
   "pypdf>=7.0,<8",
 ]
 
